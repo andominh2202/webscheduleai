@@ -25,7 +25,20 @@ export async function POST(req: NextRequest) {
       }),
       signal: AbortSignal.timeout(45000),
     });
-    if (!res.ok) return NextResponse.json({ error: 'Dịch vụ nhận diện ảnh không khả dụng. Kiểm tra Gemini API key.' }, { status: 502 });
+    if (!res.ok) {
+      const errorBody = await res.json().catch(() => null) as { error?: { status?: string; message?: string } } | null;
+      const reason = errorBody?.error?.message || '';
+      const status = res.status;
+      console.error('[Gemini OCR] upstream failure', { status, reason: reason.slice(0, 350) });
+      const error =
+        status === 400 ? 'Gemini từ chối yêu cầu (400). Kiểm tra định dạng ảnh và API key.' :
+        status === 401 || status === 403 ? 'Gemini từ chối quyền truy cập (401/403). Kiểm tra API key, API restrictions và quyền sử dụng model.' :
+        status === 404 ? 'Model gemini-2.5-flash không khả dụng cho API key/project này (404).' :
+        status === 429 ? 'Gemini đã vượt hạn mức (429). Kiểm tra quota Free Tier hoặc thử lại sau.' :
+        status >= 500 ? 'Dịch vụ Gemini đang lỗi (5xx). Thử lại sau.' :
+        'Gemini trả lỗi HTTP ' + status + '.';
+      return NextResponse.json({ error, geminiStatus: status }, { status: status === 429 ? 429 : 502 });
+    }
     const result = await res.json();
     const raw = result.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text || '').join('') || '';
     const parsed: unknown = JSON.parse(raw);
