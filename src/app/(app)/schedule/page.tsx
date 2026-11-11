@@ -156,6 +156,8 @@ export default function SchedulePage() {
   const [importBusy, setImportBusy] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importResult, setImportResult] = useState<string>('');
+  const [imageRows, setImageRows] = useState<Array<{ name: string; courseCode: string; credits: number; dayOfWeek: number; ca: number; room: string; startDate: string; endDate: string; firstWeek: number; lastWeek: number; startTime: string; endTime: string }>>([]);
+  const [imageBusy, setImageBusy] = useState(false);
 
   const currentRangeRef = useRef<{ start: Date; end: Date } | null>(null);
 
@@ -290,6 +292,65 @@ export default function SchedulePage() {
     },
     [handleRefresh]
   );
+
+  const handleImageRecognize = async (file: File) => {
+    setImageBusy(true);
+    setImageRows([]);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/import/image', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Không thể đọc ảnh');
+      setImageRows(data.rows || []);
+      toast.success(`Đã nhận diện ${data.rows?.length || 0} học phần. Hãy kiểm tra trước khi lưu.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Nhận diện ảnh thất bại');
+    } finally {
+      setImageBusy(false);
+    }
+  };
+
+  const updateImageRow = (index: number, key: string, value: string) => {
+    setImageRows((previous) => previous.map((row, i) => i === index ? { ...row, [key]: ['credits', 'dayOfWeek', 'ca', 'firstWeek', 'lastWeek'].includes(key) ? Number(value) : value } : row));
+  };
+
+  const saveImageRows = async () => {
+    if (!imageRows.length || imageRows.some((row) => !row.name || !row.courseCode || !row.startTime || !row.endTime || row.startTime >= row.endTime || !/^\\d{4}-\\d{2}-\\d{2}$/.test(row.startDate) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(row.endDate))) {
+      toast.error('Kiểm tra tên môn, mã học phần, ngày và giờ học của tất cả dòng.');
+      return;
+    }
+    const headers = ['Tên môn học', 'Mã học phần', 'Số tín chỉ', 'Thứ', 'Giờ bắt đầu', 'Giờ kết thúc', 'Phòng học', 'Từ ngày', 'Đến ngày'];
+    const csvEscape = (value: unknown) => '"' + String(value ?? '').replace(/"/g, '""') + '"';
+    const lines = [headers.map(csvEscape).join(',')];
+    for (const row of imageRows) {
+      const base = new Date(row.startDate + 'T12:00:00');
+      const start = new Date(base);
+      start.setDate(start.getDate() + (Math.max(1, row.firstWeek) - 1) * 7);
+      const end = new Date(base);
+      end.setDate(end.getDate() + (Math.max(row.firstWeek, row.lastWeek || row.firstWeek) - 1) * 7 + 6);
+      const iso = (date: Date) => format(date, 'yyyy-MM-dd');
+      lines.push([row.name, row.courseCode, row.credits, row.dayOfWeek, row.startTime, row.endTime, row.room, iso(start), iso(end) < row.endDate ? iso(end) : row.endDate].map(csvEscape).join(','));
+    }
+    const csvFile = new File([lines.join('\\n')], 'lich-tu-anh.csv', { type: 'text/csv' });
+    setImportFile(csvFile);
+    setImportBusy(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', csvFile);
+      const res = await fetch('/api/import', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Không thể lưu');
+      setImportResult(`Đã lưu ${data.createdCourses} môn, ${data.createdSchedules} lịch. ${(data.warnings || []).join('; ')}`);
+      toast.success('Đã lưu thời khóa biểu từ ảnh');
+      setImageRows([]);
+      handleRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Không thể lưu lịch');
+    } finally {
+      setImportBusy(false);
+    }
+  };
 
   const handleImport = async () => {
     if (!importFile) return;
@@ -444,9 +505,29 @@ export default function SchedulePage() {
             <DialogDescription>Nhập Excel (.xlsx, .xls) hoặc CSV từ Google Sheets (Tệp → Tải xuống → CSV). Kiểm tra dữ liệu trước khi nhập để tránh trùng lịch.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            <div className="space-y-2 rounded-lg border p-3">
+              <p className="text-sm font-semibold">Nhập lịch từ ảnh (PNG/JPEG/WebP)</p>
+              <input type="file" accept="image/png,image/jpeg,image/webp" className="block w-full text-sm" disabled={imageBusy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleImageRecognize(file); }} />
+              {imageBusy && <p className="text-xs">Đang nhận diện ảnh...</p>}
+              {imageRows.length > 0 && <div className="max-h-[50vh] space-y-3 overflow-y-auto">
+                <p className="text-xs text-muted-foreground">Kiểm tra từng dòng và điền giờ học theo ca của trường. Chỉ lưu khi đã xác nhận đúng.</p>
+                {imageRows.map((row, index) => <div key={index} className="space-y-2 rounded-md border p-2">
+                  <p className="text-sm font-semibold">Học phần {index + 1}</p>
+                  {(['name','courseCode','room','startDate','endDate','startTime','endTime'] as const).map((key) => <label key={key} className="block text-xs">
+                    {({name:'Tên môn',courseCode:'Mã học phần',room:'Phòng',startDate:'Ngày bắt đầu',endDate:'Ngày kết thúc',startTime:'Giờ bắt đầu (HH:mm)',endTime:'Giờ kết thúc (HH:mm)'})[key]}
+                    <input className="mt-1 w-full rounded border bg-background p-2" type={key.includes('Time') ? 'time' : key.includes('Date') ? 'date' : 'text'} value={row[key]} onChange={(event) => updateImageRow(index, key, event.target.value)} />
+                  </label>)}
+                  <div className="grid grid-cols-4 gap-2">
+                    {(['dayOfWeek','ca','firstWeek','lastWeek'] as const).map((key) => <label key={key} className="text-xs">{({dayOfWeek:'Thứ (1=T2)',ca:'Ca',firstWeek:'Tuần đầu',lastWeek:'Tuần cuối'})[key]}<input type="number" className="mt-1 w-full rounded border bg-background p-1" value={row[key]} onChange={(event) => updateImageRow(index, key, event.target.value)} /></label>)}
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => setImageRows((previous) => previous.filter((_, i) => i !== index))}>Bỏ dòng này</Button>
+                </div>)}
+                <Button disabled={importBusy} onClick={saveImageRows} className="w-full">{importBusy ? 'Đang lưu...' : 'Xác nhận lưu lịch từ ảnh'}</Button>
+              </div>}
+            </div>
             <input type="file" accept=".xlsx,.xls,.csv" className="block w-full text-sm" onChange={(event) => { setImportFile(event.target.files?.[0] || null); setImportResult(''); }} />
             <p className="text-xs text-muted-foreground">Cột yêu cầu: Tên môn học, Mã học phần, Thứ, Giờ bắt đầu, Giờ kết thúc. Có thể thêm Phòng học, Từ ngày, Đến ngày, Loại tuần.</p>
-            <p className="text-xs text-muted-foreground">Nhập trực tiếp từ ảnh đang được phát triển; hiện tại chưa tự nhận diện ảnh để tránh lưu lịch sai.</p>
+
             <Button disabled={!importFile || importBusy} onClick={handleImport} className="w-full">{importBusy ? 'Đang nhập...' : 'Xác nhận nhập lịch'}</Button>
             {importResult && <p role="status" className="text-sm whitespace-pre-wrap">{importResult}</p>}
           </div>
