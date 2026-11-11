@@ -1,0 +1,259 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== AUTH ====================
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  calendarToken String?   @unique
+  accounts      Account[]
+  sessions      Session[]
+
+  semesters   Semester[]
+  courses     Course[]
+  assignments Assignment[]
+  exams       Exam[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+// ==================== SEMESTER ====================
+model Semester {
+  id        String   @id @default(cuid())
+  name      String   // e.g. "Học kỳ 1 - 2024-2025"
+  startDate DateTime
+  endDate   DateTime
+  isActive  Boolean  @default(false)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courses   Course[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ==================== COURSE ====================
+model Course {
+  id                 String  @id @default(cuid())
+  name               String  // Tên môn học
+  courseCode         String  // Mã học phần
+  instructor         String? // Tên giảng viên
+  color              String  @default("#3b82f6") // Màu nhận diện
+  notes              String? // Ghi chú chung
+  credits            Int?    // Số tín chỉ
+  hasMajorAssignment Boolean @default(false) // Có bài tập lớn không
+  majorAssignmentNote String? // Chi tiết bài tập lớn
+  examFormat         String? // Hình thức thi (Tự luận, Trắc nghiệm, Vấn đáp, Đồ án...)
+  examNotes          String? // Thi như nào (đề mở/đóng, thời gian, lưu ý)
+  gradingBreakdown   String? // Chia điểm ra sao (JSON array [{label, weight}])
+  
+  semesterId String
+  semester   Semester @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  schedules   Schedule[]
+  sessions    CourseSession[]
+  assignments Assignment[]
+  exams       Exam[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([semesterId])
+}
+
+// ==================== SCHEDULE (lịch học lặp lại) ====================
+model Schedule {
+  id          String  @id @default(cuid())
+  courseId    String
+  course     Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  
+  dayOfWeek   Int     // 0=CN, 1=T2, 2=T3, ..., 6=T7
+  startTime   String  // "07:30"
+  endTime     String  // "09:30"
+  startPeriod Int?    // Tiết bắt đầu
+  numPeriods  Int?    // Số tiết
+  room        String? // Phòng học
+  location    String? // Địa điểm / Cơ sở
+  
+  startDate   DateTime // Ngày bắt đầu lịch lặp
+  endDate     DateTime // Ngày kết thúc lịch lặp
+  
+  weekType    String  @default("all") // "all" | "even" | "odd" - tuần chẵn/lẻ
+  
+  sessions    CourseSession[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([courseId])
+}
+
+// ==================== COURSE SESSION (từng buổi học cụ thể) ====================
+model CourseSession {
+  id          String   @id @default(cuid())
+  date        DateTime // Ngày cụ thể của buổi học
+  startTime   String   // "07:30"
+  endTime     String   // "09:30"
+  room        String?  // Phòng (có thể đổi phòng)
+  location    String?  // Địa điểm
+
+  status      String   @default("upcoming") // "upcoming" | "completed" | "cancelled"
+  type        String   @default("regular")  // "regular" | "makeup" | "moved"
+  
+  // Ghi chú riêng cho từng buổi
+  content     String?  // Nội dung buổi học (rich text)
+  personalNote String? // Ghi chú cá nhân (rich text)
+  
+  courseId    String
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  scheduleId String?
+  schedule   Schedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  
+  checklist   ChecklistItem[]
+  resources   Resource[]
+  assignments Assignment[]  // Bài tập được giao buổi này
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([courseId])
+  @@index([date])
+  @@index([scheduleId])
+}
+
+// ==================== CHECKLIST ITEM ====================
+model ChecklistItem {
+  id          String  @id @default(cuid())
+  text        String
+  completed   Boolean @default(false)
+  order       Int     @default(0)
+  
+  sessionId   String
+  session     CourseSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sessionId])
+}
+
+// ==================== RESOURCE (tài liệu/liên kết) ====================
+model Resource {
+  id          String  @id @default(cuid())
+  title       String
+  url         String?
+  type        String  @default("link") // "link" | "file" | "note"
+  
+  sessionId   String
+  session     CourseSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sessionId])
+}
+
+// ==================== ASSIGNMENT (bài tập) ====================
+model Assignment {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  dueDate     DateTime
+  completed   Boolean  @default(false)
+  priority    String   @default("medium") // "low" | "medium" | "high" | "urgent"
+  
+  courseId    String
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  sessionId  String?
+  session    CourseSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([courseId])
+  @@index([userId])
+  @@index([dueDate])
+}
+
+// ==================== EXAM (lịch thi) ====================
+model Exam {
+  id          String   @id @default(cuid())
+  title       String   // e.g. "Thi giữa kỳ", "Thi cuối kỳ"
+  type        String   @default("midterm") // "quiz" | "midterm" | "final" | "other"
+  date        DateTime
+  startTime   String?  // "07:30"
+  endTime     String?  // "09:30"
+  room        String?
+  location    String?
+  notes       String?
+  
+  courseId    String
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([courseId])
+  @@index([userId])
+  @@index([date])
+}
+

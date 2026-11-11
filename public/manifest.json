@@ -1,0 +1,19 @@
+{
+  "name": "WebSchedule - Quản lý lịch học thông minh",
+  "short_name": "WebSchedule",
+  "description": "Ứng dụng quản lý thời khóa biểu, ghi chú buổi học, bài tập và lịch thi dành cho sinh viên.",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "lang": "vi",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+
