@@ -94,6 +94,7 @@ export function WeekView({
   const calendarRef = useRef<FullCalendar | null>(null);
   const [rangeLabel, setRangeLabel] = useState<string>('');
   const [axisMode, setAxisMode] = useState<'hour' | 'period'>('hour');
+  const [compact, setCompact] = useState(true);
   const lastRangeRef = useRef<string>('');
 
   const events: EventInput[] = useMemo(() => {
@@ -280,6 +281,10 @@ export function WeekView({
             </div>
           )}
 
+          <Button variant="outline" size="sm" onClick={() => setCompact((value) => !value)}>
+            {compact ? 'Xem rộng' : 'Thu gọn'}
+          </Button>
+
           {/* Axis Mode Toggle */}
           <div className="inline-flex items-center rounded-md border bg-card p-0.5 text-xs print:hidden">
             <button
@@ -320,8 +325,8 @@ export function WeekView({
       )}
 
       {/* FullCalendar Week Grid */}
-      <div className="relative rounded-xl border bg-card p-2 sm:p-4 shadow-sm overflow-x-auto">
-        <div className="min-w-[640px]">
+      <div className="relative rounded-xl border bg-card p-1 sm:p-4 shadow-sm overflow-x-auto">
+        <div className={compact ? "w-full min-w-0 [&_.fc-col-header-cell-cushion]:text-[10px] sm:[&_.fc-col-header-cell-cushion]:text-sm [&_.fc-timegrid-event]:overflow-hidden [&_.fc-timegrid-event]:text-[10px] [&_.fc-timegrid-slot]:h-[1.6em]" : "min-w-[760px]"}>
           <FullCalendar
             ref={calendarRef}
             plugins={[timeGridPlugin, interactionPlugin]}
@@ -331,7 +336,7 @@ export function WeekView({
             headerToolbar={false}
             slotMinTime="06:00:00"
             slotMaxTime="22:00:00"
-            slotDuration="00:30:00"
+            slotDuration={compact ? "01:00:00" : "00:30:00"}
             slotLabelContent={(arg) => {
               if (axisMode === 'period') {
                 const h = arg.date.getHours();
@@ -362,6 +367,8 @@ export function WeekView({
             editable={Boolean(onSessionReschedule)}
             eventDurationEditable={Boolean(onSessionReschedule)}
             height="auto"
+            eventMinHeight={compact ? 14 : 24}
+            dayHeaderClassNames={compact ? "text-[10px] sm:text-sm" : ""}
             expandRows={true}
             events={events}
             eventContent={renderEventContent}
