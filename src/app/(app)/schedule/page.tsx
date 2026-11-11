@@ -12,6 +12,7 @@ import {
   List,
   Printer,
   RefreshCw,
+  Upload,
 } from 'lucide-react';
 import {
   Dialog,
@@ -151,6 +152,10 @@ export default function SchedulePage() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [makeupOpen, setMakeupOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importResult, setImportResult] = useState<string>('');
 
   const currentRangeRef = useRef<{ start: Date; end: Date } | null>(null);
 
@@ -286,6 +291,27 @@ export default function SchedulePage() {
     [handleRefresh]
   );
 
+  const handleImport = async () => {
+    if (!importFile) return;
+    setImportBusy(true);
+    setImportResult('');
+    try {
+      const formData = new FormData();
+      formData.append('file', importFile);
+      const res = await fetch('/api/import', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Không thể nhập lịch');
+      const message = `Đã nhập ${data.createdCourses} môn, ${data.createdSchedules} lịch, ${data.createdSessions} buổi học.`;
+      setImportResult(message + (data.warnings?.length ? ` Cảnh báo: ${data.warnings.slice(0, 5).join('; ')}` : ''));
+      toast.success(message);
+      handleRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Nhập lịch thất bại');
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -298,6 +324,9 @@ export default function SchedulePage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 print:hidden">
+          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)} className="gap-1.5">
+            <Upload className="w-4 h-4" /> Nhập lịch
+          </Button>
           <Button
             size="sm"
             onClick={() => setMakeupOpen(true)}
@@ -407,6 +436,22 @@ export default function SchedulePage() {
           />
         </TabsContent>
       </Tabs>
+
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Nhập thời khóa biểu</DialogTitle>
+            <DialogDescription>Nhập Excel (.xlsx, .xls) hoặc CSV từ Google Sheets (Tệp → Tải xuống → CSV). Kiểm tra dữ liệu trước khi nhập để tránh trùng lịch.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <input type="file" accept=".xlsx,.xls,.csv" className="block w-full text-sm" onChange={(event) => { setImportFile(event.target.files?.[0] || null); setImportResult(''); }} />
+            <p className="text-xs text-muted-foreground">Cột yêu cầu: Tên môn học, Mã học phần, Thứ, Giờ bắt đầu, Giờ kết thúc. Có thể thêm Phòng học, Từ ngày, Đến ngày, Loại tuần.</p>
+            <p className="text-xs text-muted-foreground">Nhập trực tiếp từ ảnh đang được phát triển; hiện tại chưa tự nhận diện ảnh để tránh lưu lịch sai.</p>
+            <Button disabled={!importFile || importBusy} onClick={handleImport} className="w-full">{importBusy ? 'Đang nhập...' : 'Xác nhận nhập lịch'}</Button>
+            {importResult && <p role="status" className="text-sm whitespace-pre-wrap">{importResult}</p>}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Makeup Session Dialog */}
       <MakeupSessionDialog
