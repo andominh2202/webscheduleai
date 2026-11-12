@@ -1,27 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/api-helpers';
 import { handleApiError } from '@/lib/route-error';
+import { parseOcrDay, parseImportedDate } from '@/lib/schedule-import';
 
 export const runtime = 'nodejs';
-
-// Convert the weekday as printed in Vietnamese, never ask OCR to calculate it.
-function parseVietnameseWeekday(value: unknown): number | null {
-  const text = String(value ?? '').trim().toLowerCase();
-  if (/^(chủ nhật|chu nhat|cn)$/.test(text)) return 0;
-  const match = text.match(/^(?:thứ|thu|t)\s*([2-7])$/);
-  return match ? Number(match[1]) - 1 : null;
-}
-
-// OCR dates are Vietnamese day/month/year. Convert them exactly once to ISO.
-function parseOcrDate(value: unknown): string | null {
-  const text = String(value ?? '').trim();
-  const match = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
-  if (!match) return null;
-  const day = Number(match[1]), month = Number(match[2]), year = Number(match[3]);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
-  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,7 +16,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Chọn ảnh PNG/JPEG/WebP dưới 5 MB.' }, { status: 400 });
     }
     const bytes = Buffer.from(await file.arrayBuffer());
-    const prompt = `Đọc ảnh bảng đăng ký học phần tiếng Việt. Chỉ trả JSON array (không markdown). Mỗi phần tử gồm: name (tên môn), courseCode (mã LHP), credits (số tín chỉ), dayText (chép nguyên văn thứ học như Thứ 2, Thứ 3, Thứ 7, Chủ nhật; KHÔNG đổi thành số), ca (số ca 1/2/3 hoặc null), room (phòng), startDate (chép nguyên văn DD/MM/YYYY từ cột Từ ngày), endDate (chép nguyên văn DD/MM/YYYY từ cột Đến ngày), firstWeek (số tuần bắt đầu), lastWeek (số tuần kết thúc). Đọc chuỗi như "Thứ 3,ca 1,tuần 1-19,D6.205". Tuyệt đối không đảo ngày và tháng, không chuyển ngày sang định dạng Mỹ. Ví dụ 04/01/2027 nghĩa là ngày 4 tháng 1 năm 2027. Không suy đoán giờ bắt đầu/kết thúc. Chỉ lấy dòng môn học, bỏ hàng tiêu đề và hàng hủy.`;
+    const prompt = `Đọc ảnh bảng đăng ký học phần tiếng Việt. Chỉ trả JSON array (không markdown). Mỗi phần tử gồm: name (tên môn), courseCode (mã LHP), credits (số tín chỉ), dayText (chép nguyên văn thứ học như Thứ 2, Thứ 3, Thứ 7, Chủ nhật; KHÔNG đổi thành số), ca (số ca 1/2/3/4 hoặc null), room (phòng), startDate (chép nguyên văn DD/MM/YYYY từ cột Từ ngày), endDate (chép nguyên văn DD/MM/YYYY từ cột Đến ngày), firstWeek (số tuần bắt đầu), lastWeek (số tuần kết thúc). Đọc chuỗi như "Thứ 3,ca 1,tuần 1-19,D6.205". Tuyệt đối không đảo ngày và tháng, không chuyển ngày sang định dạng Mỹ. Ví dụ 04/01/2027 nghĩa là ngày 4 tháng 1 năm 2027. Không suy đoán giờ bắt đầu/kết thúc. Chỉ lấy dòng môn học, bỏ hàng tiêu đề và hàng hủy.`;
     const model = process.env.OPENROUTER_MODEL?.trim();
     if (!model || !model.endsWith(':free')) {
       return NextResponse.json({ error: 'Cấu hình OPENROUTER_MODEL bằng model :free hỗ trợ ảnh để tránh phát sinh phí.' }, { status: 503 });
@@ -97,11 +79,11 @@ export async function POST(req: NextRequest) {
       name: String(item.name || '').slice(0, 150),
       courseCode: String(item.courseCode || '').slice(0, 80),
       credits: Number(item.credits) || 0,
-      dayOfWeek: parseVietnameseWeekday(item.dayText) ?? (Number.isInteger(Number(item.dayOfWeek)) && Number(item.dayOfWeek) >= 0 && Number(item.dayOfWeek) <= 6 ? Number(item.dayOfWeek) : -1),
+      dayOfWeek: parseOcrDay(item.dayText) ?? -1,
       ca: Number(item.ca) || 0,
       room: String(item.room || '').slice(0, 80),
-      startDate: parseOcrDate(item.startDate) || '',
-      endDate: parseOcrDate(item.endDate) || '',
+      startDate: parseImportedDate(item.startDate) || '',
+      endDate: parseImportedDate(item.endDate) || '',
       firstWeek: Number(item.firstWeek) || 1,
       lastWeek: Number(item.lastWeek) || 0,
       startTime: '',
