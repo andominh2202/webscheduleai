@@ -14,6 +14,7 @@ import type {
 } from '@fullcalendar/core';
 import { format } from 'date-fns';
 import { vi } from 'date-fns/locale';
+import { toVnDateString } from '@/lib/timezone';
 import {
   ChevronLeft,
   ChevronRight,
@@ -80,7 +81,7 @@ function normalizeTime(timeStr?: string | null): string {
 }
 
 function buildIsoDateTime(dateStr: string, timeStr: string): string {
-  const datePart = format(new Date(dateStr), 'yyyy-MM-dd');
+  const datePart = toVnDateString(dateStr);
   return `${datePart}T${normalizeTime(timeStr)}:00`;
 }
 
