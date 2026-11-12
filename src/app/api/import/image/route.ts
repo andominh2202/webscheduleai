@@ -16,30 +16,40 @@ export async function POST(req: NextRequest) {
     }
     const bytes = Buffer.from(await file.arrayBuffer());
     const prompt = `Đọc ảnh bảng đăng ký học phần tiếng Việt. Chỉ trả JSON array (không markdown). Mỗi phần tử gồm: name (tên môn), courseCode (mã LHP), credits (số tín chỉ), dayOfWeek (0=CN, 1=T2,...6=T7), ca (số ca 1/2/3 hoặc null), room (phòng), startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), firstWeek (số tuần bắt đầu), lastWeek (số tuần kết thúc). Đọc chuỗi như "Thứ 3,ca 1,tuần 1-19,D6.205". Không suy đoán giờ bắt đầu/kết thúc. Chỉ lấy dòng môn học, bỏ hàng tiêu đề và hàng hủy.`;
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: file.type, data: bytes.toString('base64') } }] }],
-        generationConfig: { responseMimeType: 'application/json', temperature: 0 }
-      }),
-      signal: AbortSignal.timeout(45000),
+    const requestBody = JSON.stringify({
+      contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: file.type, data: bytes.toString('base64') } }] }],
+      generationConfig: { responseMimeType: 'application/json', temperature: 0 },
     });
-    if (!res.ok) {
-      const errorBody = await res.json().catch(() => null) as { error?: { status?: string; message?: string } } | null;
-      const reason = errorBody?.error?.message || '';
-      const status = res.status;
-      console.error('[Gemini OCR] upstream failure', { status, reason: reason.slice(0, 350) });
-      const error =
-        status === 400 ? 'Gemini từ chối yêu cầu (400). Kiểm tra định dạng ảnh và API key.' :
-        status === 401 || status === 403 ? 'Gemini từ chối quyền truy cập (401/403). Kiểm tra API key, API restrictions và quyền sử dụng model.' :
-        status === 404 ? 'Model gemini-2.5-flash không khả dụng cho API key/project này (404).' :
-        status === 429 ? 'Gemini đã vượt hạn mức (429). Kiểm tra quota Free Tier hoặc thử lại sau.' :
-        status >= 500 ? 'Dịch vụ Gemini đang lỗi (5xx). Thử lại sau.' :
-        'Gemini trả lỗi HTTP ' + status + '.';
-      return NextResponse.json({ error, geminiStatus: status }, { status: status === 429 ? 429 : 502 });
+    const configured = process.env.GEMINI_MODEL?.trim();
+    const models = Array.from(new Set([configured, 'gemini-2.5-flash', 'gemini-2.0-flash'].filter((name): name is string => Boolean(name))));
+    let result: { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> } | null = null;
+    let lastStatus = 404;
+    for (const model of models) {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: requestBody,
+        signal: AbortSignal.timeout(45000),
+      });
+      if (res.ok) {
+        result = await res.json();
+        break;
+      }
+      lastStatus = res.status;
+      const errorBody = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      console.error('[Gemini OCR] upstream failure', { model, status: res.status, reason: (errorBody?.error?.message || '').slice(0, 350) });
+      if (res.status !== 404) break;
     }
-    const result = await res.json();
+    if (!result) {
+      const error =
+        lastStatus === 400 ? 'Gemini từ chối yêu cầu (400). Kiểm tra API key hoặc định dạng ảnh.' :
+        lastStatus === 401 || lastStatus === 403 ? 'Gemini từ chối quyền truy cập (401/403). Kiểm tra API key và giới hạn quyền.' :
+        lastStatus === 404 ? 'Không tìm được model Gemini khả dụng (404). Kiểm tra quyền model và GEMINI_MODEL.' :
+        lastStatus === 429 ? 'Gemini vượt hạn mức (429). Kiểm tra quota Free Tier.' :
+        lastStatus >= 500 ? 'Dịch vụ Gemini gặp lỗi máy chủ. Thử lại sau.' :
+        'Gemini trả lỗi HTTP ' + lastStatus + '.';
+      return NextResponse.json({ error, geminiStatus: lastStatus }, { status: lastStatus === 429 ? 429 : 502 });
+    }
     const raw = result.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text || '').join('') || '';
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) throw new Error('Không đọc được bảng học phần');
