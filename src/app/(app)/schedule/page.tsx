@@ -233,83 +233,46 @@ export default function SchedulePage() {
 
   const currentRangeRef = useRef<{ start: Date; end: Date } | null>(null);
 
-  const fetchOverlayData = useCallback(async () => {
+  const requestIdRef = useRef(0);
+  const loadSchedule = useCallback(async (startDate?: Date, endDate?: Date, listMode = false) => {
+    const requestId = ++requestIdRef.current;
+    if (listMode) setLoadingListSessions(true);
+    else setLoadingSessions(true);
     try {
-      const [coursesRes, assignmentsRes, examsRes] = await Promise.all([
-        fetch('/api/courses', { cache: 'no-store' }),
-        fetch('/api/assignments', { cache: 'no-store' }),
-        fetch('/api/exams', { cache: 'no-store' }),
-      ]);
-
-      if (coursesRes.ok) {
-        const data = await coursesRes.json();
-        if (Array.isArray(data)) setCourses(data);
+      const params = new URLSearchParams();
+      if (listMode) params.set('allSessions', 'true');
+      else if (startDate && endDate) {
+        params.set('startDate', format(startDate, 'yyyy-MM-dd'));
+        params.set('endDate', format(endDate, 'yyyy-MM-dd'));
       }
-      if (assignmentsRes.ok) {
-        const data = await assignmentsRes.json();
-        if (Array.isArray(data)) setAssignments(data);
+      const res = await fetch(`/api/schedule-overview?${params}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error('Không thể tải dữ liệu thời khóa biểu');
+      const data = await res.json();
+      if (requestId !== requestIdRef.current) return;
+      setCourses(Array.isArray(data.courses) ? data.courses : []);
+      setAssignments(Array.isArray(data.assignments) ? data.assignments : []);
+      setExams(Array.isArray(data.exams) ? data.exams : []);
+      if (listMode) setAllSessions(Array.isArray(data.sessions) ? data.sessions : []);
+      else setSessions(Array.isArray(data.sessions) ? data.sessions : []);
+    } catch (error) {
+      if (requestId === requestIdRef.current) toast.error(error instanceof Error ? error.message : 'Lỗi tải lịch học');
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoadingSessions(false);
+        setLoadingListSessions(false);
       }
-      if (examsRes.ok) {
-        const data = await examsRes.json();
-        if (Array.isArray(data)) setExams(data);
-      }
-    } catch {
-      // Non-blocking
     }
   }, []);
 
-  const fetchSessionsByRange = useCallback(async (startDate: Date, endDate: Date) => {
+  const fetchSessionsByRange = useCallback((startDate: Date, endDate: Date) => {
     currentRangeRef.current = { start: startDate, end: endDate };
-    setLoadingSessions(true);
-    try {
-      const startParam = format(startDate, 'yyyy-MM-dd');
-      const endParam = format(endDate, 'yyyy-MM-dd');
-      const res = await fetch(
-        `/api/sessions?startDate=${encodeURIComponent(startParam)}&endDate=${encodeURIComponent(endParam)}`,
-        { cache: 'no-store' }
-      );
-      if (!res.ok) {
-        throw new Error('Không thể tải lịch học');
-      }
-      const data = await res.json();
-      setSessions(Array.isArray(data) ? data : []);
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : 'Đã xảy ra lỗi khi tải lịch học'
-      );
-    } finally {
-      setLoadingSessions(false);
-    }
-  }, []);
+    return loadSchedule(startDate, endDate);
+  }, [loadSchedule]);
 
-  const fetchAllSessions = useCallback(async () => {
-    setLoadingListSessions(true);
-    try {
-      const res = await fetch('/api/sessions', { cache: 'no-store' });
-      if (!res.ok) {
-        throw new Error('Không thể tải danh sách buổi học');
-      }
-      const data = await res.json();
-      setAllSessions(Array.isArray(data) ? data : []);
-    } catch (err) {
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : 'Đã xảy ra lỗi khi tải danh sách buổi học'
-      );
-    } finally {
-      setLoadingListSessions(false);
-    }
-  }, []);
+  const fetchAllSessions = useCallback(() => loadSchedule(undefined, undefined, true), [loadSchedule]);
 
   useEffect(() => {
-    fetchOverlayData();
-  }, [fetchOverlayData]);
-
-  useEffect(() => {
-    if (activeTab === 'list') {
-      fetchAllSessions();
-    }
+    if (activeTab === 'list') fetchAllSessions();
   }, [activeTab, fetchAllSessions]);
 
   const handleDateRangeChange = useCallback(
@@ -320,7 +283,6 @@ export default function SchedulePage() {
   );
 
   const handleRefresh = useCallback(() => {
-    fetchOverlayData();
     if (activeTab === 'list') {
       fetchAllSessions();
     } else if (currentRangeRef.current) {
@@ -329,7 +291,7 @@ export default function SchedulePage() {
         currentRangeRef.current.end
       );
     }
-  }, [activeTab, fetchAllSessions, fetchOverlayData, fetchSessionsByRange]);
+  }, [activeTab, fetchAllSessions, fetchSessionsByRange]);
 
   useEffect(() => {
     const handler = () => handleRefresh();
