@@ -88,7 +88,8 @@ function NotesPageContent() {
     try {
       const params = new URLSearchParams();
       if (courseFilter !== 'all') params.set('courseId', courseFilter);
-      const qs = params.toString() ? `?${params.toString()}` : '';
+      params.set('notesOnly', 'true');
+      const qs = `?${params.toString()}`;
 
       const [courseRes, sessionRes] = await Promise.all([
         fetch('/api/courses'),
