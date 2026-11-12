@@ -23,11 +23,12 @@ export async function POST(req: NextRequest) {
     const requestBody = {
       model,
       messages: [{ role: 'user', content: [
-        { type: 'text', text: prompt + ' Trả về duy nhất JSON array hợp lệ.' },
+        { type: 'text', text: prompt + ' Không giải thích, không suy luận thành lời. Xuất ngay JSON array ngắn gọn hợp lệ.' },
         { type: 'image_url', image_url: { url: `data:${file.type};base64,${bytes.toString('base64')}` } },
       ] }],
       temperature: 0,
-      max_tokens: 3000,
+      max_tokens: 8000,
+      reasoning: { effort: 'none' },
     };
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest) {
     const raw = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     if (!raw) {
       console.error('[OpenRouter OCR] empty completion', { model, finishReason: choice?.finish_reason, upstreamError: result.error?.message });
-      return NextResponse.json({ error: 'Model không trả nội dung nhận diện. Thử model vision khác hoặc ảnh rõ hơn.' }, { status: 502 });
+      return NextResponse.json({ error: choice?.finish_reason === 'length' ? 'Model đã hết token trước khi xuất kết quả OCR. Thử lại hoặc đổi model vision không suy luận.' : 'Model không trả nội dung nhận diện. Thử model vision khác hoặc ảnh rõ hơn.' }, { status: 502 });
     }
     let parsed: unknown;
     try {
