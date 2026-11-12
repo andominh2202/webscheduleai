@@ -153,6 +153,25 @@ function exportWeekScheduleToPng(sessions: ScheduleSession[], startDate?: Date) 
   link.click();
 }
 
+function VietnameseDateInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const display = (iso: string) => /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso.split('-').reverse().join('/') : iso;
+  const [draft, setDraft] = useState(() => display(value));
+  useEffect(() => { setDraft(display(value)); }, [value]);
+  const commit = () => {
+    const match = draft.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!match) { setDraft(display(value)); toast.error('Ngày phải có dạng DD/MM/YYYY'); return; }
+    const day = Number(match[1]), month = Number(match[2]), year = Number(match[3]);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
+      setDraft(display(value)); toast.error('Ngày không hợp lệ'); return;
+    }
+    const iso = `${match[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    onChange(iso);
+    setDraft(display(iso));
+  };
+  return <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" aria-label="Ngày (ngày/tháng/năm)" className="mt-1 w-full rounded border bg-background p-2" value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />;
+}
+
 export default function SchedulePage() {
   const [activeTab, setActiveTab] = useState<ScheduleTab>('week');
   const [sessions, setSessions] = useState<ScheduleSession[]>([]);
@@ -582,7 +601,7 @@ export default function SchedulePage() {
                   <p className="text-sm font-semibold">Học phần {index + 1}</p>
                   {(['name','courseCode','room','startDate','endDate','startTime','endTime'] as const).map((key) => <label key={key} className="block text-xs">
                     {({name:'Tên môn',courseCode:'Mã học phần',room:'Phòng',startDate:'Ngày bắt đầu',endDate:'Ngày kết thúc',startTime:'Giờ bắt đầu (HH:mm)',endTime:'Giờ kết thúc (HH:mm)'})[key]}
-                    <input className="mt-1 w-full rounded border bg-background p-2" type={key.includes('Time') ? 'time' : key.includes('Date') ? 'date' : 'text'} value={row[key]} onChange={(event) => updateImageRow(index, key, event.target.value)} />
+                    {key.includes('Date') ? <VietnameseDateInput value={row[key]} onChange={(value) => updateImageRow(index, key, value)} /> : <input className="mt-1 w-full rounded border bg-background p-2" type="text" placeholder={key.includes('Time') ? 'HH:mm (24 giờ)' : undefined} value={row[key]} onChange={(event) => updateImageRow(index, key, event.target.value)} />}
                   </label>)}
                   <div className="grid grid-cols-4 gap-2">
                     {(['dayOfWeek','ca','firstWeek','lastWeek'] as const).map((key) => <label key={key} className="text-xs">{({dayOfWeek:'Thứ (1=T2)',ca:'Ca',firstWeek:'Tuần đầu',lastWeek:'Tuần cuối'})[key]}<input type="number" className="mt-1 w-full rounded border bg-background p-1" value={row[key]} onChange={(event) => updateImageRow(index, key, event.target.value)} /></label>)}
