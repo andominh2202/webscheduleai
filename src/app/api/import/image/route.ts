@@ -4,6 +4,14 @@ import { handleApiError } from '@/lib/route-error';
 
 export const runtime = 'nodejs';
 
+// Convert the weekday as printed in Vietnamese, never ask OCR to calculate it.
+function parseVietnameseWeekday(value: unknown): number | null {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (/^(chủ nhật|chu nhat|cn)$/.test(text)) return 0;
+  const match = text.match(/^(?:thứ|thu|t)\s*([2-7])$/);
+  return match ? Number(match[1]) - 1 : null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     await requireAuth();
@@ -15,7 +23,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Chọn ảnh PNG/JPEG/WebP dưới 5 MB.' }, { status: 400 });
     }
     const bytes = Buffer.from(await file.arrayBuffer());
-    const prompt = `Đọc ảnh bảng đăng ký học phần tiếng Việt. Chỉ trả JSON array (không markdown). Mỗi phần tử gồm: name (tên môn), courseCode (mã LHP), credits (số tín chỉ), dayOfWeek (0=CN, 1=T2,...6=T7), ca (số ca 1/2/3 hoặc null), room (phòng), startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), firstWeek (số tuần bắt đầu), lastWeek (số tuần kết thúc). Đọc chuỗi như "Thứ 3,ca 1,tuần 1-19,D6.205". Không suy đoán giờ bắt đầu/kết thúc. Chỉ lấy dòng môn học, bỏ hàng tiêu đề và hàng hủy.`;
+    const prompt = `Đọc ảnh bảng đăng ký học phần tiếng Việt. Chỉ trả JSON array (không markdown). Mỗi phần tử gồm: name (tên môn), courseCode (mã LHP), credits (số tín chỉ), dayText (chép nguyên văn thứ học như Thứ 2, Thứ 3, Thứ 7, Chủ nhật; KHÔNG đổi thành số), ca (số ca 1/2/3 hoặc null), room (phòng), startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), firstWeek (số tuần bắt đầu), lastWeek (số tuần kết thúc). Đọc chuỗi như "Thứ 3,ca 1,tuần 1-19,D6.205". Không suy đoán giờ bắt đầu/kết thúc. Chỉ lấy dòng môn học, bỏ hàng tiêu đề và hàng hủy.`;
     const model = process.env.OPENROUTER_MODEL?.trim();
     if (!model || !model.endsWith(':free')) {
       return NextResponse.json({ error: 'Cấu hình OPENROUTER_MODEL bằng model :free hỗ trợ ảnh để tránh phát sinh phí.' }, { status: 503 });
@@ -78,7 +86,7 @@ export async function POST(req: NextRequest) {
       name: String(item.name || '').slice(0, 150),
       courseCode: String(item.courseCode || '').slice(0, 80),
       credits: Number(item.credits) || 0,
-      dayOfWeek: Number(item.dayOfWeek) || 0,
+      dayOfWeek: parseVietnameseWeekday(item.dayText) ?? (Number.isInteger(Number(item.dayOfWeek)) && Number(item.dayOfWeek) >= 0 && Number(item.dayOfWeek) <= 6 ? Number(item.dayOfWeek) : -1),
       ca: Number(item.ca) || 0,
       room: String(item.room || '').slice(0, 80),
       startDate: String(item.startDate || ''),
@@ -88,6 +96,7 @@ export async function POST(req: NextRequest) {
       startTime: '',
       endTime: '',
     })).filter((r: { name: string; courseCode: string }) => r.name && r.courseCode);
+    if (rows.some((row) => row.dayOfWeek < 0)) return NextResponse.json({ error: 'Không đọc rõ thứ học. Vui lòng thử lại với ảnh rõ hơn.' }, { status: 422 });
     return NextResponse.json({ rows });
   } catch (error) {
     return handleApiError(error, 'Không thể nhận diện thời khóa biểu từ ảnh');
