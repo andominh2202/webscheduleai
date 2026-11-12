@@ -11,6 +11,7 @@ import {
 import { handleApiError } from '@/lib/route-error';
 import { parseVnDate } from '@/lib/timezone';
 import { COURSE_COLORS } from '@/lib/utils';
+import { parseImportedDate, parseImportedDay, parseImportedTime } from '@/lib/schedule-import';
 
 interface RawRow {
   [key: string]: unknown;
@@ -24,21 +25,6 @@ function getField(row: RawRow, keys: string[]): string {
     }
   }
   return '';
-}
-
-function parseDayOfWeek(val: string): number {
-  const num = Number(val);
-  if (!Number.isNaN(num) && num >= 0 && num <= 6) return num;
-  if (num === 8) return 0; // Nhiều trường ở VN ghi CN = 8 hoặc 0
-  const lower = val.toLowerCase();
-  if (lower.includes('chủ nhật') || lower === 'cn') return 0;
-  if (lower.includes('2')) return 1;
-  if (lower.includes('3')) return 2;
-  if (lower.includes('4')) return 3;
-  if (lower.includes('5')) return 4;
-  if (lower.includes('6')) return 5;
-  if (lower.includes('7')) return 6;
-  return 1;
 }
 
 export async function POST(req: NextRequest) {
@@ -90,6 +76,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'File không có dữ liệu hợp lệ' }, { status: 400 });
     }
 
+    // Validate every imported row before any database write.
+    // Refuse malformed dates/times/weekday rather than silently creating incorrect sessions.
+    const preparedRows = rows.map((row, index) => {
+      const name = getField(row, ['Tên môn học', 'Ten mon hoc', 'name', 'CourseName']);
+      const courseCode = getField(row, ['Mã học phần', 'Ma hoc phan', 'courseCode', 'Code']);
+      if (!name || !courseCode) throw new Error(`Dòng ${index + 2}: Thiếu tên môn hoặc mã học phần.`);
+      const dayRaw = getField(row, ['Thứ', 'Thu', 'dayOfWeek', 'Tên thứ']);
+      const day = parseImportedDay(dayRaw);
+      if (day === null) throw new Error(`Dòng ${index + 2}: Thứ học không hợp lệ (${dayRaw}). Dùng Thứ 2–Thứ 7, CN hoặc số nội bộ 0–6.`);
+      const startTime = parseImportedTime(getField(row, ['Giờ bắt đầu', 'Gio bat dau', 'startTime']));
+      const endTime = parseImportedTime(getField(row, ['Giờ kết thúc', 'Gio ket thuc', 'endTime']));
+      if (!startTime || !endTime || startTime >= endTime) throw new Error(`Dòng ${index + 2}: Giờ học không hợp lệ, dùng HH:mm và giờ kết thúc sau giờ bắt đầu.`);
+      const startRaw = getField(row, ['Từ ngày', 'Tu ngay', 'startDate']);
+      const endRaw = getField(row, ['Đến ngày', 'Den ngay', 'endDate']);
+      const from = startRaw ? parseImportedDate(startRaw) : null;
+      const to = endRaw ? parseImportedDate(endRaw) : null;
+      if ((startRaw && !from) || (endRaw && !to) || (from && to && from > to)) {
+        throw new Error(`Dòng ${index + 2}: Ngày không hợp lệ. Dùng DD/MM/YYYY hoặc YYYY-MM-DD.`);
+      }
+      return { row, name, courseCode, day, startTime, endTime, from, to };
+    });
+
     let createdCourses = 0;
     let createdSchedules = 0;
     let createdSessions = 0;
@@ -100,27 +108,16 @@ export async function POST(req: NextRequest) {
     });
     const courseByCode = new Map(existingCourses.map((c) => [c.courseCode.toLowerCase(), c]));
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const name = getField(row, ['Tên môn học', 'Ten mon hoc', 'name', 'CourseName']);
-      const courseCode = getField(row, ['Mã học phần', 'Ma hoc phan', 'courseCode', 'Code']);
-      if (!name || !courseCode) {
-        warnings.push(`Dòng ${i + 2}: Thiếu tên môn hoặc mã học phần, đã bỏ qua.`);
-        continue;
-      }
+    for (let i = 0; i < preparedRows.length; i++) {
+      const { row, name, courseCode, day, startTime, endTime, from, to } = preparedRows[i];
 
       const instructor = getField(row, ['Giảng viên', 'Giang vien', 'instructor']);
       const creditsRaw = getField(row, ['Số tín chỉ', 'So tin chi', 'credits']);
       const colorRaw = getField(row, ['Màu sắc', 'Mau sac', 'color']);
-      const dayRaw = getField(row, ['Thứ', 'Thu', 'dayOfWeek', 'Tên thứ']);
-      const startTime = getField(row, ['Giờ bắt đầu', 'Gio bat dau', 'startTime']) || '07:30';
-      const endTime = getField(row, ['Giờ kết thúc', 'Gio ket thuc', 'endTime']) || '09:30';
       const startPeriodRaw = getField(row, ['Tiết bắt đầu', 'Tiet bat dau', 'startPeriod']);
       const numPeriodsRaw = getField(row, ['Số tiết', 'So tiet', 'numPeriods']);
       const room = getField(row, ['Phòng học', 'Phong hoc', 'room']);
       const location = getField(row, ['Địa điểm', 'Dia diem', 'location']);
-      const startDateRaw = getField(row, ['Từ ngày', 'Tu ngay', 'startDate']);
-      const endDateRaw = getField(row, ['Đến ngày', 'Den ngay', 'endDate']);
       const weekTypeRaw = getField(row, ['Loại tuần', 'Loai tuan', 'weekType']) || 'all';
 
       let course = courseByCode.get(courseCode.toLowerCase());
@@ -141,10 +138,31 @@ export async function POST(req: NextRequest) {
         createdCourses++;
       }
 
-      const dayOfWeek = parseDayOfWeek(dayRaw || '1');
-      const startDate = startDateRaw ? parseVnDate(startDateRaw) : semester.startDate;
-      const endDate = endDateRaw ? parseVnDate(endDateRaw) : semester.endDate;
+      const dayOfWeek = day;
+      const startDate = from ? parseVnDate(from) : semester.startDate;
+      const endDate = to ? parseVnDate(to) : semester.endDate;
       const weekType = ['all', 'even', 'odd'].includes(weekTypeRaw) ? weekTypeRaw : 'all';
+
+      // Idempotent sequential imports: do not create the same recurring schedule twice.
+      // Keep existing sessions and their notes/checklists untouched.
+      const duplicate = await prisma.schedule.findFirst({
+        where: {
+          courseId: course.id,
+          dayOfWeek,
+          startTime,
+          endTime,
+          startDate,
+          endDate,
+          weekType,
+          room: room || null,
+          location: location || null,
+        },
+        select: { id: true },
+      });
+      if (duplicate) {
+        warnings.push(`Dòng ${i + 2} (${name}): Lịch đã tồn tại, đã bỏ qua để tránh trùng.`);
+        continue;
+      }
 
       const conflicts = await checkScheduleConflicts({
         userId,
@@ -191,6 +209,9 @@ export async function POST(req: NextRequest) {
       warnings,
     });
   } catch (error) {
+    if (error instanceof Error && /^Dòng \d+:/.test(error.message)) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     return handleApiError(error, 'Không thể nhập file thời khóa biểu');
   }
 }
