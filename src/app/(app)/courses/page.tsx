@@ -1,5 +1,7 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+
 import * as React from 'react';
 import { Suspense } from 'react';
 import Link from 'next/link';
@@ -42,11 +44,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/toast';
-import {
-  CourseFormDialog,
-  CourseItem,
-  SemesterOption,
-} from '@/components/courses/course-form-dialog';
+
+
+import type { CourseItem, SemesterOption } from '@/components/courses/course-form-dialog';
+const CourseFormDialog = dynamic(() => import('@/components/courses/course-form-dialog').then((m) => m.CourseFormDialog), { ssr: false });
 
 function CoursesPageContent() {
   const router = useRouter();
