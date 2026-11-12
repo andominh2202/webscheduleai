@@ -7,8 +7,8 @@ export const runtime = 'nodejs';
 export async function POST(req: NextRequest) {
   try {
     await requireAuth();
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return NextResponse.json({ error: 'Chưa cấu hình GEMINI_API_KEY trên Vercel để nhận diện ảnh.' }, { status: 503 });
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return NextResponse.json({ error: 'Chưa cấu hình OPENROUTER_API_KEY trên Vercel để nhận diện ảnh.' }, { status: 503 });
     const data = await req.formData();
     const file = data.get('file');
     if (!(file instanceof File) || !file.type.startsWith('image/') || file.size > 5 * 1024 * 1024) {
@@ -16,41 +16,40 @@ export async function POST(req: NextRequest) {
     }
     const bytes = Buffer.from(await file.arrayBuffer());
     const prompt = `Đọc ảnh bảng đăng ký học phần tiếng Việt. Chỉ trả JSON array (không markdown). Mỗi phần tử gồm: name (tên môn), courseCode (mã LHP), credits (số tín chỉ), dayOfWeek (0=CN, 1=T2,...6=T7), ca (số ca 1/2/3 hoặc null), room (phòng), startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), firstWeek (số tuần bắt đầu), lastWeek (số tuần kết thúc). Đọc chuỗi như "Thứ 3,ca 1,tuần 1-19,D6.205". Không suy đoán giờ bắt đầu/kết thúc. Chỉ lấy dòng môn học, bỏ hàng tiêu đề và hàng hủy.`;
-    const requestBody = JSON.stringify({
-      contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: file.type, data: bytes.toString('base64') } }] }],
-      generationConfig: { responseMimeType: 'application/json', temperature: 0 },
+    const model = process.env.OPENROUTER_MODEL?.trim();
+    if (!model || !model.endsWith(':free')) {
+      return NextResponse.json({ error: 'Cấu hình OPENROUTER_MODEL bằng model :free hỗ trợ ảnh để tránh phát sinh phí.' }, { status: 503 });
+    }
+    const requestBody = {
+      model,
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: prompt + ' Trả về duy nhất JSON array hợp lệ.' },
+        { type: 'image_url', image_url: { url: `data:${file.type};base64,${bytes.toString('base64')}` } },
+      ] }],
+      temperature: 0,
+      max_tokens: 3000,
+    };
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(60000),
     });
-    const configured = process.env.GEMINI_MODEL?.trim();
-    const models = Array.from(new Set([configured, 'gemini-2.5-flash', 'gemini-2.0-flash'].filter((name): name is string => Boolean(name))));
-    let result: { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> } | null = null;
-    let lastStatus = 404;
-    for (const model of models) {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body: requestBody,
-        signal: AbortSignal.timeout(45000),
-      });
-      if (res.ok) {
-        result = await res.json();
-        break;
-      }
-      lastStatus = res.status;
+    if (!res.ok) {
       const errorBody = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-      console.error('[Gemini OCR] upstream failure', { model, status: res.status, reason: (errorBody?.error?.message || '').slice(0, 350) });
-      if (res.status !== 404) break;
+      const reason = (errorBody?.error?.message || '').slice(0, 300);
+      console.error('[OpenRouter OCR] upstream failure', { model, status: res.status, reason });
+      const message = res.status === 401 || res.status === 403 ? 'OpenRouter từ chối API key hoặc quyền truy cập.' :
+        res.status === 402 ? 'OpenRouter yêu cầu credits hoặc hạn mức key 0 USD đang chặn yêu cầu.' :
+        res.status === 404 ? 'OpenRouter không tìm thấy model đã chọn. Kiểm tra OPENROUTER_MODEL.' :
+        res.status === 429 ? 'OpenRouter hết hạn mức miễn phí. Thử lại sau.' :
+        `OpenRouter trả lỗi HTTP ${res.status}.`;
+      return NextResponse.json({ error: message }, { status: res.status === 429 ? 429 : 502 });
     }
-    if (!result) {
-      const error =
-        lastStatus === 400 ? 'Gemini từ chối yêu cầu (400). Kiểm tra API key hoặc định dạng ảnh.' :
-        lastStatus === 401 || lastStatus === 403 ? 'Gemini từ chối quyền truy cập (401/403). Kiểm tra API key và giới hạn quyền.' :
-        lastStatus === 404 ? 'Không tìm được model Gemini khả dụng (404). Kiểm tra quyền model và GEMINI_MODEL.' :
-        lastStatus === 429 ? 'Gemini vượt hạn mức (429). Kiểm tra quota Free Tier.' :
-        lastStatus >= 500 ? 'Dịch vụ Gemini gặp lỗi máy chủ. Thử lại sau.' :
-        'Gemini trả lỗi HTTP ' + lastStatus + '.';
-      return NextResponse.json({ error, geminiStatus: lastStatus }, { status: lastStatus === 429 ? 429 : 502 });
-    }
-    const raw = result.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text || '').join('') || '';
+    const result = await res.json() as { choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }> };
+    const content = result.choices?.[0]?.message?.content;
+    const rawText = typeof content === 'string' ? content : Array.isArray(content) ? content.map((p) => p.text || '').join('') : '';
+    const raw = rawText.replace(/^\\s*```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, '').trim();
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) throw new Error('Không đọc được bảng học phần');
     const rows = parsed.slice(0, 80).map((item: Record<string, unknown>) => ({
