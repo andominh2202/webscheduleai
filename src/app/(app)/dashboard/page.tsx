@@ -1,5 +1,7 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
@@ -36,7 +38,9 @@ import {
   PRIORITY_LABELS,
   SESSION_STATUS_LABELS,
 } from '@/lib/utils';
-import { SessionDetailPanel } from '@/components/sessions/session-detail-panel';
+
+
+const SessionDetailPanel = dynamic(() => import('@/components/sessions/session-detail-panel').then((m) => m.SessionDetailPanel), { ssr: false });
 
 interface CourseSummary {
   id: string;
