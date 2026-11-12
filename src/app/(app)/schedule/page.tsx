@@ -1,5 +1,7 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import {
@@ -31,8 +33,11 @@ import {
   type MonthViewExam,
 } from '@/components/schedule/month-view';
 import { ListView, type ListViewCourse } from '@/components/schedule/list-view';
-import { MakeupSessionDialog } from '@/components/schedule/makeup-session-dialog';
-import { SessionDetailPanel } from '@/components/sessions/session-detail-panel';
+
+
+
+const SessionDetailPanel = dynamic(() => import('@/components/sessions/session-detail-panel').then((m) => m.SessionDetailPanel), { ssr: false });
+const MakeupSessionDialog = dynamic(() => import('@/components/schedule/makeup-session-dialog').then((m) => m.MakeupSessionDialog), { ssr: false });
 
 type ScheduleTab = 'week' | 'month' | 'list';
 type ScheduleSession = WeekViewSession;
