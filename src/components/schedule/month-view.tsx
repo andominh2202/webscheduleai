@@ -13,6 +13,7 @@ import type {
 } from '@fullcalendar/core';
 import { format } from 'date-fns';
 import { vi } from 'date-fns/locale';
+import { toVnDateString } from '@/lib/timezone';
 import {
   BookOpen,
   Calendar as CalendarIcon,
@@ -101,7 +102,7 @@ function normalizeTime(timeStr?: string | null): string {
 }
 
 function getLocalDateKey(dateInput: string | Date): string {
-  return format(new Date(dateInput), 'yyyy-MM-dd');
+  return toVnDateString(dateInput);
 }
 
 export function MonthView({
