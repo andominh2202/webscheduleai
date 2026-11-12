@@ -36,6 +36,20 @@ import { SessionDetailPanel } from '@/components/sessions/session-detail-panel';
 
 type ScheduleTab = 'week' | 'month' | 'list';
 type ScheduleSession = WeekViewSession;
+type ClassPeriod = { start: string; end: string };
+const DEFAULT_CLASS_PERIODS: Record<number, ClassPeriod> = {
+  1: { start: '07:00', end: '09:25' },
+  2: { start: '09:35', end: '12:00' },
+  3: { start: '13:00', end: '15:25' },
+  4: { start: '15:35', end: '18:00' },
+};
+const CLASS_PERIODS_STORAGE_KEY = 'webschedule-class-periods-v1';
+const validClock = (value: string) => /^([01]\\d|2[0-3]):[0-5]\\d$/.test(value);
+function applyPeriod<T extends { ca: number; startTime: string; endTime: string }>(row: T, periods: Record<number, ClassPeriod>): T {
+  const period = periods[row.ca];
+  return period ? { ...row, startTime: period.start, endTime: period.end } : row;
+}
+
 
 function exportWeekScheduleToPng(sessions: ScheduleSession[], startDate?: Date) {
   const canvas = document.createElement('canvas');
@@ -158,6 +172,40 @@ export default function SchedulePage() {
   const [importResult, setImportResult] = useState<string>('');
   const [imageRows, setImageRows] = useState<Array<{ name: string; courseCode: string; credits: number; dayOfWeek: number; ca: number; room: string; startDate: string; endDate: string; firstWeek: number; lastWeek: number; startTime: string; endTime: string }>>([]);
   const [imageBusy, setImageBusy] = useState(false);
+  const [classPeriods, setClassPeriods] = useState<Record<number, ClassPeriod>>(DEFAULT_CLASS_PERIODS);
+  const [periodEditorOpen, setPeriodEditorOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(CLASS_PERIODS_STORAGE_KEY);
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as Record<string, ClassPeriod>;
+      const merged = { ...DEFAULT_CLASS_PERIODS };
+      for (const ca of [1, 2, 3, 4]) {
+        const period = parsed[String(ca)];
+        if (period && validClock(period.start) && validClock(period.end) && period.start < period.end) {
+          merged[ca] = period;
+        }
+      }
+      setClassPeriods(merged);
+    } catch {
+      // Invalid stored preferences: use defaults.
+    }
+  }, []);
+
+  const updateClassPeriod = (ca: number, field: keyof ClassPeriod, value: string) => {
+    setClassPeriods((previous) => ({ ...previous, [ca]: { ...previous[ca], [field]: value } }));
+  };
+  const saveClassPeriods = () => {
+    if (Object.values(classPeriods).some((period) => !validClock(period.start) || !validClock(period.end) || period.start >= period.end)) {
+      toast.error('Giờ bắt đầu phải trước giờ kết thúc và đúng định dạng.');
+      return;
+    }
+    window.localStorage.setItem(CLASS_PERIODS_STORAGE_KEY, JSON.stringify(classPeriods));
+    setImageRows((previous) => previous.map((row) => applyPeriod(row, classPeriods)));
+    setPeriodEditorOpen(false);
+    toast.success('Đã lưu giờ học theo ca trên thiết bị này.');
+  };
 
   const currentRangeRef = useRef<{ start: Date; end: Date } | null>(null);
 
@@ -302,7 +350,7 @@ export default function SchedulePage() {
       const res = await fetch('/api/import/image', { method: 'POST', body: formData });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Không thể đọc ảnh');
-      setImageRows(data.rows || []);
+      setImageRows((data.rows || []).map((row: typeof imageRows[number]) => applyPeriod(row, classPeriods)));
       toast.success(`Đã nhận diện ${data.rows?.length || 0} học phần. Hãy kiểm tra trước khi lưu.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Nhận diện ảnh thất bại');
@@ -312,7 +360,7 @@ export default function SchedulePage() {
   };
 
   const updateImageRow = (index: number, key: string, value: string) => {
-    setImageRows((previous) => previous.map((row, i) => i === index ? { ...row, [key]: ['credits', 'dayOfWeek', 'ca', 'firstWeek', 'lastWeek'].includes(key) ? Number(value) : value } : row));
+    setImageRows((previous) => previous.map((row, i) => i === index ? (key === 'ca' ? applyPeriod({ ...row, ca: Number(value) }, classPeriods) : { ...row, [key]: ['credits', 'dayOfWeek', 'firstWeek', 'lastWeek'].includes(key) ? Number(value) : value }) : row));
   };
 
   const saveImageRows = async () => {
@@ -508,9 +556,28 @@ export default function SchedulePage() {
             <div className="space-y-2 rounded-lg border p-3">
               <p className="text-sm font-semibold">Nhập lịch từ ảnh (PNG/JPEG/WebP)</p>
               <input type="file" accept="image/png,image/jpeg,image/webp" className="block w-full text-sm" disabled={imageBusy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleImageRecognize(file); }} />
+              <div className="space-y-2 rounded-md border p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold">Giờ học theo ca (có thể tùy chỉnh theo trường)</p>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setPeriodEditorOpen((value) => !value)}>{periodEditorOpen ? 'Đóng' : 'Chỉnh giờ ca'}</Button>
+                </div>
+                <p className="text-xs text-muted-foreground">{[1, 2, 3, 4].map((ca) => `Ca ${ca}: ${classPeriods[ca].start}–${classPeriods[ca].end}`).join(' · ')}</p>
+                {periodEditorOpen && <div className="space-y-2">
+                  {[1, 2, 3, 4].map((ca) => <div key={ca} className="grid grid-cols-[45px_1fr_1fr] items-center gap-2">
+                    <span className="text-xs">Ca {ca}</span>
+                    <input aria-label={`Ca ${ca} bắt đầu`} type="time" className="w-full rounded border bg-background p-1 text-sm" value={classPeriods[ca].start} onChange={(event) => updateClassPeriod(ca, 'start', event.target.value)} />
+                    <input aria-label={`Ca ${ca} kết thúc`} type="time" className="w-full rounded border bg-background p-1 text-sm" value={classPeriods[ca].end} onChange={(event) => updateClassPeriod(ca, 'end', event.target.value)} />
+                  </div>)}
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" size="sm" onClick={saveClassPeriods}>Lưu giờ học</Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setClassPeriods(DEFAULT_CLASS_PERIODS)}>Khôi phục mặc định</Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Cấu hình lưu trên trình duyệt này. Sau khi lưu, giờ các dòng đang xem sẽ cập nhật theo ca.</p>
+                </div>}
+              </div>
               {imageBusy && <p className="text-xs">Đang nhận diện ảnh...</p>}
               {imageRows.length > 0 && <div className="max-h-[50vh] space-y-3 overflow-y-auto">
-                <p className="text-xs text-muted-foreground">Kiểm tra từng dòng và điền giờ học theo ca của trường. Chỉ lưu khi đã xác nhận đúng.</p>
+                <p className="text-xs text-muted-foreground">Giờ được tự điền theo ca. Có thể chỉnh riêng từng dòng trước khi lưu.</p>
                 {imageRows.map((row, index) => <div key={index} className="space-y-2 rounded-md border p-2">
                   <p className="text-sm font-semibold">Học phần {index + 1}</p>
                   {(['name','courseCode','room','startDate','endDate','startTime','endTime'] as const).map((key) => <label key={key} className="block text-xs">
