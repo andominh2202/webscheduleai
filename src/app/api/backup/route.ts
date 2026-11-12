@@ -51,6 +51,42 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Fail closed before deleting anything: a partial or malformed backup must never
+    // silently replace a user's complete dataset with only a subset.
+    const sections = ['semesters', 'courses', 'schedules', 'sessions', 'assignments', 'exams'] as const;
+    if (body?.version !== 1 || sections.some((key) => !Array.isArray(data[key]))) {
+      return NextResponse.json({ error: 'Bản sao lưu thiếu dữ liệu hoặc phiên bản không hỗ trợ. Không thay đổi dữ liệu hiện tại.' }, { status: 400 });
+    }
+    if (sections.some((key) => data[key].length > 20000)) {
+      return NextResponse.json({ error: 'Bản sao lưu quá lớn, đã từ chối để bảo vệ dữ liệu.' }, { status: 413 });
+    }
+    const hasUniqueIds = (items: unknown[]): boolean =>
+      items.every((item) => typeof item === 'object' && item !== null && typeof (item as { id?: unknown }).id === 'string' && Boolean((item as { id: string }).id)) &&
+      new Set(items.map((item) => (item as { id: string }).id)).size === items.length;
+    if (sections.some((key) => !hasUniqueIds(data[key]))) {
+      return NextResponse.json({ error: 'Bản sao lưu có ID trống hoặc trùng. Không thay đổi dữ liệu.' }, { status: 400 });
+    }
+    const semesterIds = new Set<string>(data.semesters.map((item: { id: string }) => item.id));
+    const courseIds = new Set<string>(data.courses.map((item: { id: string }) => item.id));
+    const scheduleIds = new Set<string>(data.schedules.map((item: { id: string }) => item.id));
+    const sessionIds = new Set<string>(data.sessions.map((item: { id: string }) => item.id));
+    const validDate = (input: unknown) => typeof input === 'string' && !Number.isNaN(new Date(input).getTime());
+    const invalid =
+      data.semesters.some((item: { name?: unknown; startDate?: unknown; endDate?: unknown }) => !item.name || !validDate(item.startDate) || !validDate(item.endDate)) ||
+      data.courses.some((item: { name?: unknown; courseCode?: unknown; semesterId: string }) => !item.name || !item.courseCode || !semesterIds.has(item.semesterId)) ||
+      data.schedules.some((item: { courseId: string; dayOfWeek: number; startTime: string; endTime: string; startDate: string; endDate: string }) =>
+        !courseIds.has(item.courseId) || !Number.isInteger(item.dayOfWeek) || item.dayOfWeek < 0 || item.dayOfWeek > 6 ||
+        !validDate(item.startDate) || !validDate(item.endDate) || item.startDate > item.endDate || !item.startTime || !item.endTime || item.startTime >= item.endTime) ||
+      data.sessions.some((item: { courseId: string; scheduleId?: string | null; date?: string; startTime?: string; endTime?: string }) =>
+        !courseIds.has(item.courseId) || (item.scheduleId != null && !scheduleIds.has(item.scheduleId)) ||
+        !validDate(item.date) || !item.startTime || !item.endTime || item.startTime >= item.endTime) ||
+      data.assignments.some((item: { courseId: string; sessionId?: string | null; dueDate?: string }) =>
+        !courseIds.has(item.courseId) || (item.sessionId != null && !sessionIds.has(item.sessionId)) || !validDate(item.dueDate)) ||
+      data.exams.some((item: { courseId: string; date?: string }) => !courseIds.has(item.courseId) || !validDate(item.date));
+    if (invalid) {
+      return NextResponse.json({ error: 'Bản sao lưu không nhất quán hoặc có ngày sai. Dữ liệu hiện tại vẫn được giữ nguyên.' }, { status: 400 });
+    }
+
     await prisma.$transaction(async (tx) => {
       await tx.exam.deleteMany({ where: { userId } });
       await tx.assignment.deleteMany({ where: { userId } });
