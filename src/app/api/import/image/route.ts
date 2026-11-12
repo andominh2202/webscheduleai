@@ -12,6 +12,17 @@ function parseVietnameseWeekday(value: unknown): number | null {
   return match ? Number(match[1]) - 1 : null;
 }
 
+// OCR dates are Vietnamese day/month/year. Convert them exactly once to ISO.
+function parseOcrDate(value: unknown): string | null {
+  const text = String(value ?? '').trim();
+  const match = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if (!match) return null;
+  const day = Number(match[1]), month = Number(match[2]), year = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     await requireAuth();
@@ -23,7 +34,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Chọn ảnh PNG/JPEG/WebP dưới 5 MB.' }, { status: 400 });
     }
     const bytes = Buffer.from(await file.arrayBuffer());
-    const prompt = `Đọc ảnh bảng đăng ký học phần tiếng Việt. Chỉ trả JSON array (không markdown). Mỗi phần tử gồm: name (tên môn), courseCode (mã LHP), credits (số tín chỉ), dayText (chép nguyên văn thứ học như Thứ 2, Thứ 3, Thứ 7, Chủ nhật; KHÔNG đổi thành số), ca (số ca 1/2/3 hoặc null), room (phòng), startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), firstWeek (số tuần bắt đầu), lastWeek (số tuần kết thúc). Đọc chuỗi như "Thứ 3,ca 1,tuần 1-19,D6.205". Không suy đoán giờ bắt đầu/kết thúc. Chỉ lấy dòng môn học, bỏ hàng tiêu đề và hàng hủy.`;
+    const prompt = `Đọc ảnh bảng đăng ký học phần tiếng Việt. Chỉ trả JSON array (không markdown). Mỗi phần tử gồm: name (tên môn), courseCode (mã LHP), credits (số tín chỉ), dayText (chép nguyên văn thứ học như Thứ 2, Thứ 3, Thứ 7, Chủ nhật; KHÔNG đổi thành số), ca (số ca 1/2/3 hoặc null), room (phòng), startDate (chép nguyên văn DD/MM/YYYY từ cột Từ ngày), endDate (chép nguyên văn DD/MM/YYYY từ cột Đến ngày), firstWeek (số tuần bắt đầu), lastWeek (số tuần kết thúc). Đọc chuỗi như "Thứ 3,ca 1,tuần 1-19,D6.205". Tuyệt đối không đảo ngày và tháng, không chuyển ngày sang định dạng Mỹ. Ví dụ 04/01/2027 nghĩa là ngày 4 tháng 1 năm 2027. Không suy đoán giờ bắt đầu/kết thúc. Chỉ lấy dòng môn học, bỏ hàng tiêu đề và hàng hủy.`;
     const model = process.env.OPENROUTER_MODEL?.trim();
     if (!model || !model.endsWith(':free')) {
       return NextResponse.json({ error: 'Cấu hình OPENROUTER_MODEL bằng model :free hỗ trợ ảnh để tránh phát sinh phí.' }, { status: 503 });
@@ -89,14 +100,15 @@ export async function POST(req: NextRequest) {
       dayOfWeek: parseVietnameseWeekday(item.dayText) ?? (Number.isInteger(Number(item.dayOfWeek)) && Number(item.dayOfWeek) >= 0 && Number(item.dayOfWeek) <= 6 ? Number(item.dayOfWeek) : -1),
       ca: Number(item.ca) || 0,
       room: String(item.room || '').slice(0, 80),
-      startDate: String(item.startDate || ''),
-      endDate: String(item.endDate || ''),
+      startDate: parseOcrDate(item.startDate) || '',
+      endDate: parseOcrDate(item.endDate) || '',
       firstWeek: Number(item.firstWeek) || 1,
       lastWeek: Number(item.lastWeek) || 0,
       startTime: '',
       endTime: '',
     })).filter((r: { name: string; courseCode: string }) => r.name && r.courseCode);
     if (rows.some((row) => row.dayOfWeek < 0)) return NextResponse.json({ error: 'Không đọc rõ thứ học. Vui lòng thử lại với ảnh rõ hơn.' }, { status: 422 });
+    if (rows.some((row) => !row.startDate || !row.endDate || row.startDate > row.endDate)) return NextResponse.json({ error: 'OCR đọc ngày không hợp lệ. Kiểm tra định dạng ngày/tháng/năm trong ảnh.' }, { status: 422 });
     return NextResponse.json({ rows });
   } catch (error) {
     return handleApiError(error, 'Không thể nhận diện thời khóa biểu từ ảnh');
