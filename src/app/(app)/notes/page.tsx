@@ -1,5 +1,7 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+
 import * as React from 'react';
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -28,10 +30,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from '@/components/ui/toast';
-import {
-  SessionDetailData,
-  SessionDetailPanel,
-} from '@/components/sessions/session-detail-panel';
+
+
+import type { SessionDetailData } from '@/components/sessions/session-detail-panel';
+const SessionDetailPanel = dynamic(() => import('@/components/sessions/session-detail-panel').then((m) => m.SessionDetailPanel), { ssr: false });
 
 interface CourseFilterOption {
   id: string;
