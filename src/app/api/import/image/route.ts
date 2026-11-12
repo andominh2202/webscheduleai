@@ -46,11 +46,32 @@ export async function POST(req: NextRequest) {
         `OpenRouter trả lỗi HTTP ${res.status}.`;
       return NextResponse.json({ error: message }, { status: res.status === 429 ? 429 : 502 });
     }
-    const result = await res.json() as { choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }> };
-    const content = result.choices?.[0]?.message?.content;
+    const result = await res.json() as {
+      choices?: Array<{ finish_reason?: string; message?: { content?: string | Array<{ text?: string }> } }>;
+      error?: { message?: string };
+    };
+    const choice = result.choices?.[0];
+    const content = choice?.message?.content;
     const rawText = typeof content === 'string' ? content : Array.isArray(content) ? content.map((p) => p.text || '').join('') : '';
-    const raw = rawText.replace(/^\\s*```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, '').trim();
-    const parsed: unknown = JSON.parse(raw);
+    const raw = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    if (!raw) {
+      console.error('[OpenRouter OCR] empty completion', { model, finishReason: choice?.finish_reason, upstreamError: result.error?.message });
+      return NextResponse.json({ error: 'Model không trả nội dung nhận diện. Thử model vision khác hoặc ảnh rõ hơn.' }, { status: 502 });
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      const start = raw.indexOf('[');
+      const end = raw.lastIndexOf(']');
+      try {
+        if (start < 0 || end <= start) throw new Error('No JSON array');
+        parsed = JSON.parse(raw.slice(start, end + 1));
+      } catch {
+        console.error('[OpenRouter OCR] invalid completion JSON', { model, finishReason: choice?.finish_reason, length: raw.length, preview: raw.slice(0, 120) });
+        return NextResponse.json({ error: choice?.finish_reason === 'length' ? 'Model trả dữ liệu quá dài và bị cắt. Hãy thử ảnh ít môn hơn.' : 'Model trả kết quả không đúng định dạng JSON. Hãy thử lại hoặc đổi model vision.' }, { status: 502 });
+      }
+    }
     if (!Array.isArray(parsed)) throw new Error('Không đọc được bảng học phần');
     const rows = parsed.slice(0, 80).map((item: Record<string, unknown>) => ({
       name: String(item.name || '').slice(0, 150),
