@@ -13,6 +13,7 @@ export async function GET(req: NextRequest) {
     const endDate = searchParams.get('endDate');
     const status = searchParams.get('status');
     const semesterId = searchParams.get('semesterId');
+    const notesOnly = searchParams.get('notesOnly') === 'true';
 
     const dateFilter: { gte?: Date; lte?: Date } = {};
     if (startDate) {
@@ -30,6 +31,10 @@ export async function GET(req: NextRequest) {
         },
         ...(courseId && courseId !== 'all' ? { courseId } : {}),
         ...(status && status !== 'all' ? { status } : {}),
+        ...(notesOnly ? { OR: [
+          { AND: [{ content: { not: null } }, { content: { not: '' } }] },
+          { AND: [{ personalNote: { not: null } }, { personalNote: { not: '' } }] },
+        ] } : {}),
         ...(startDate || endDate ? { date: dateFilter } : {}),
       },
       include: {
