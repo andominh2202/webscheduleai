@@ -44,7 +44,7 @@ const DEFAULT_CLASS_PERIODS: Record<number, ClassPeriod> = {
   4: { start: '15:35', end: '18:00' },
 };
 const CLASS_PERIODS_STORAGE_KEY = 'webschedule-class-periods-v1';
-const validClock = (value: string) => /^([01]\\d|2[0-3]):[0-5]\\d$/.test(value);
+const validClock = (value: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 function applyPeriod<T extends { ca: number; startTime: string; endTime: string }>(row: T, periods: Record<number, ClassPeriod>): T {
   const period = periods[row.ca];
   return period ? { ...row, startTime: period.start, endTime: period.end } : row;
@@ -364,7 +364,7 @@ export default function SchedulePage() {
   };
 
   const saveImageRows = async () => {
-    if (!imageRows.length || imageRows.some((row) => !row.name || !row.courseCode || !row.startTime || !row.endTime || row.startTime >= row.endTime || !/^\\d{4}-\\d{2}-\\d{2}$/.test(row.startDate) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(row.endDate))) {
+    if (!imageRows.length || imageRows.some((row) => !row.name || !row.courseCode || !row.startTime || !row.endTime || row.startTime >= row.endTime || !/^\d{4}-\d{2}-\d{2}$/.test(row.startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(row.endDate))) {
       toast.error('Kiểm tra tên môn, mã học phần, ngày và giờ học của tất cả dòng.');
       return;
     }
@@ -380,7 +380,7 @@ export default function SchedulePage() {
       const iso = (date: Date) => format(date, 'yyyy-MM-dd');
       lines.push([row.name, row.courseCode, row.credits, row.dayOfWeek, row.startTime, row.endTime, row.room, iso(start), iso(end) < row.endDate ? iso(end) : row.endDate].map(csvEscape).join(','));
     }
-    const csvFile = new File([lines.join('\\n')], 'lich-tu-anh.csv', { type: 'text/csv' });
+    const csvFile = new File([lines.join('\n')], 'lich-tu-anh.csv', { type: 'text/csv' });
     setImportFile(csvFile);
     setImportBusy(true);
     try {
