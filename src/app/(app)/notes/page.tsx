@@ -13,6 +13,7 @@ import {
   StickyNote,
 } from 'lucide-react';
 import { cn, formatDate } from '@/lib/utils';
+import { getCached, setCached, invalidateCache } from '@/lib/client-cache';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -71,11 +72,14 @@ function NotesPageContent() {
   const searchParams = useSearchParams();
   const initialSearch = searchParams.get('search') || '';
 
-  const [sessions, setSessions] = React.useState<SessionDetailData[]>([]);
-  const [courses, setCourses] = React.useState<CourseFilterOption[]>([]);
+  const cachedSessions = getCached<SessionDetailData[]>('/api/sessions?notesOnly=true');
+  const cachedCourses = getCached<CourseFilterOption[]>('/api/courses');
+
+  const [sessions, setSessions] = React.useState<SessionDetailData[]>(() => cachedSessions || []);
+  const [courses, setCourses] = React.useState<CourseFilterOption[]>(() => cachedCourses || []);
   const [courseFilter, setCourseFilter] = React.useState<string>('all');
   const [searchQuery, setSearchQuery] = React.useState(initialSearch);
-  const [loading, setLoading] = React.useState(true);
+  const [loading, setLoading] = React.useState(() => !cachedSessions);
   const [selectedSessionId, setSelectedSessionId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -85,32 +89,51 @@ function NotesPageContent() {
     }
   }, [searchParams]);
 
-  const fetchData = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (courseFilter !== 'all') params.set('courseId', courseFilter);
-      params.set('notesOnly', 'true');
-      const qs = `?${params.toString()}`;
+  const abortCtrlRef = React.useRef<AbortController | null>(null);
 
+  const fetchData = React.useCallback(async () => {
+    abortCtrlRef.current?.abort();
+    abortCtrlRef.current = new AbortController();
+
+    const params = new URLSearchParams();
+    if (courseFilter !== 'all') params.set('courseId', courseFilter);
+    params.set('notesOnly', 'true');
+    const qs = `?${params.toString()}`;
+    const sessUrl = `/api/sessions${qs}`;
+
+    setSessions((prev) => {
+      const cached = getCached<SessionDetailData[]>(sessUrl);
+      if (cached) return cached;
+      if (prev.length === 0) setLoading(true);
+      return prev;
+    });
+
+    try {
       const [courseRes, sessionRes] = await Promise.all([
-        fetch('/api/courses'),
-        fetch(`/api/sessions${qs}`),
+        fetch('/api/courses', { signal: abortCtrlRef.current.signal }),
+        fetch(sessUrl, { signal: abortCtrlRef.current.signal }),
       ]);
 
       if (courseRes.ok) {
         const cData = await courseRes.json();
-        setCourses(Array.isArray(cData) ? cData : []);
+        const list = Array.isArray(cData) ? cData : [];
+        setCourses(list);
+        setCached('/api/courses', list);
       }
 
       if (sessionRes.ok) {
         const sData = await sessionRes.json();
-        setSessions(Array.isArray(sData) ? sData : []);
+        const list = Array.isArray(sData) ? sData : [];
+        setSessions(list);
+        setCached(sessUrl, list);
+        if (courseFilter === 'all') setCached('/api/sessions?notesOnly=true', list);
       } else {
         toast.error('Không thể tải danh sách ghi chú');
       }
-    } catch {
-      toast.error('Lỗi kết nối khi tải ghi chú');
+    } catch (err: unknown) {
+      if ((err as Error)?.name !== 'AbortError') {
+        toast.error('Lỗi kết nối khi tải ghi chú');
+      }
     } finally {
       setLoading(false);
     }
@@ -118,6 +141,15 @@ function NotesPageContent() {
 
   React.useEffect(() => {
     fetchData();
+    return () => {
+      abortCtrlRef.current?.abort();
+    };
+  }, [fetchData]);
+
+  React.useEffect(() => {
+    const handleSemChange = () => fetchData();
+    window.addEventListener('semester-changed', handleSemChange);
+    return () => window.removeEventListener('semester-changed', handleSemChange);
   }, [fetchData]);
 
   const courseMap = React.useMemo(() => {
@@ -314,7 +346,12 @@ function NotesPageContent() {
         onOpenChange={(open) => {
           if (!open) setSelectedSessionId(null);
         }}
-        onUpdated={fetchData}
+        onUpdated={() => {
+          invalidateCache('/api/sessions');
+          invalidateCache('/api/schedule-overview');
+          invalidateCache('/api/dashboard');
+          fetchData();
+        }}
       />
     </div>
   );

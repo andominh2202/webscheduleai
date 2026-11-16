@@ -8,7 +8,9 @@ import {
   CalendarDays,
   CalendarPlus,
   CalendarRange,
+  ChevronDown,
   Download,
+  FileSpreadsheet,
   HelpCircle,
   Image as ImageIcon,
   List,
@@ -23,9 +25,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/toast';
+import { getCached, setCached, invalidateCache } from '@/lib/client-cache';
 import { WeekView, type WeekViewSession } from '@/components/schedule/week-view';
 import {
   MonthView,
@@ -234,28 +244,49 @@ export default function SchedulePage() {
   const currentRangeRef = useRef<{ start: Date; end: Date } | null>(null);
 
   const requestIdRef = useRef(0);
+  const abortCtrlRef = useRef<AbortController | null>(null);
+
   const loadSchedule = useCallback(async (startDate?: Date, endDate?: Date, listMode = false) => {
     const requestId = ++requestIdRef.current;
-    if (listMode) setLoadingListSessions(true);
-    else setLoadingSessions(true);
+    abortCtrlRef.current?.abort();
+    abortCtrlRef.current = new AbortController();
+
+    const params = new URLSearchParams();
+    if (listMode) params.set('allSessions', 'true');
+    else if (startDate && endDate) {
+      params.set('startDate', format(startDate, 'yyyy-MM-dd'));
+      params.set('endDate', format(endDate, 'yyyy-MM-dd'));
+    }
+    const cacheKey = `/api/schedule-overview?${params.toString()}`;
+    const cached = getCached<{ courses: any[]; assignments: any[]; exams: any[]; sessions: any[] }>(cacheKey);
+    if (cached) {
+      setCourses(Array.isArray(cached.courses) ? cached.courses : []);
+      setAssignments(Array.isArray(cached.assignments) ? cached.assignments : []);
+      setExams(Array.isArray(cached.exams) ? cached.exams : []);
+      if (listMode) setAllSessions(Array.isArray(cached.sessions) ? cached.sessions : []);
+      else setSessions(Array.isArray(cached.sessions) ? cached.sessions : []);
+    } else {
+      if (listMode) setLoadingListSessions(true);
+      else setLoadingSessions(true);
+    }
+
     try {
-      const params = new URLSearchParams();
-      if (listMode) params.set('allSessions', 'true');
-      else if (startDate && endDate) {
-        params.set('startDate', format(startDate, 'yyyy-MM-dd'));
-        params.set('endDate', format(endDate, 'yyyy-MM-dd'));
-      }
-      const res = await fetch(`/api/schedule-overview?${params}`, { cache: 'no-store' });
+      const res = await fetch(`/api/schedule-overview?${params}`, {
+        signal: abortCtrlRef.current.signal,
+      });
       if (!res.ok) throw new Error('Không thể tải dữ liệu thời khóa biểu');
       const data = await res.json();
       if (requestId !== requestIdRef.current) return;
+      setCached(cacheKey, data);
       setCourses(Array.isArray(data.courses) ? data.courses : []);
       setAssignments(Array.isArray(data.assignments) ? data.assignments : []);
       setExams(Array.isArray(data.exams) ? data.exams : []);
       if (listMode) setAllSessions(Array.isArray(data.sessions) ? data.sessions : []);
       else setSessions(Array.isArray(data.sessions) ? data.sessions : []);
-    } catch (error) {
-      if (requestId === requestIdRef.current) toast.error(error instanceof Error ? error.message : 'Lỗi tải lịch học');
+    } catch (error: unknown) {
+      if ((error as Error)?.name !== 'AbortError' && requestId === requestIdRef.current) {
+        toast.error(error instanceof Error ? error.message : 'Lỗi tải lịch học');
+      }
     } finally {
       if (requestId === requestIdRef.current) {
         setLoadingSessions(false);
@@ -283,6 +314,8 @@ export default function SchedulePage() {
   );
 
   const handleRefresh = useCallback(() => {
+    invalidateCache('/api/schedule-overview');
+    invalidateCache('/api/dashboard');
     if (activeTab === 'list') {
       fetchAllSessions();
     } else if (currentRangeRef.current) {
@@ -296,7 +329,10 @@ export default function SchedulePage() {
   useEffect(() => {
     const handler = () => handleRefresh();
     window.addEventListener('semester-changed', handler);
-    return () => window.removeEventListener('semester-changed', handler);
+    return () => {
+      window.removeEventListener('semester-changed', handler);
+      abortCtrlRef.current?.abort();
+    };
   }, [handleRefresh]);
 
   const handleSessionReschedule = useCallback(
@@ -419,63 +455,91 @@ export default function SchedulePage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 print:hidden">
-          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)} className="gap-1.5">
-            <Upload className="w-4 h-4" /> Nhập lịch
-          </Button>
           <Button
             size="sm"
             onClick={() => setMakeupOpen(true)}
-            className="gap-1.5"
+            className="gap-1.5 shadow-sm"
           >
             <CalendarPlus className="w-4 h-4" />
             Học bù / Đổi lịch
           </Button>
+
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              window.location.href = '/api/export/ics';
-            }}
+            onClick={() => setImportOpen(true)}
             className="gap-1.5"
           >
-            <Download className="w-4 h-4" />
-            Xuất .ics
+            <Upload className="w-4 h-4" />
+            Nhập lịch
           </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <Download className="w-4 h-4" />
+                <span>Xuất & In</span>
+                <ChevronDown className="w-3.5 h-3.5 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem
+                onClick={() => {
+                  window.location.href = '/api/export/excel';
+                }}
+                className="gap-2 cursor-pointer"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                <span>Xuất file Excel (.xlsx)</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  window.location.href = '/api/export/ics';
+                }}
+                className="gap-2 cursor-pointer"
+              >
+                <Download className="w-4 h-4 text-blue-600" />
+                <span>Xuất iCalendar (.ics)</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  exportWeekScheduleToPng(sessions, currentRangeRef.current?.start)
+                }
+                className="gap-2 cursor-pointer"
+              >
+                <ImageIcon className="w-4 h-4 text-purple-600" />
+                <span>Xuất ảnh TKB (.png)</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => window.print()}
+                className="gap-2 cursor-pointer"
+              >
+                <Printer className="w-4 h-4 text-muted-foreground" />
+                <span>In / Xuất PDF</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <Button
-            variant="outline"
-            size="sm"
-            onClick={() => exportWeekScheduleToPng(sessions, currentRangeRef.current?.start)}
-            className="gap-1.5"
-          >
-            <ImageIcon className="w-4 h-4" />
-            Xuất ảnh
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => window.print()}
-            className="gap-1.5"
-          >
-            <Printer className="w-4 h-4" />
-            In / PDF
-          </Button>
-          <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             onClick={() => setGuideOpen(true)}
-            className="gap-1.5"
+            className="gap-1.5 text-muted-foreground hover:text-foreground"
           >
             <HelpCircle className="w-4 h-4" />
-            Chỉ dẫn
+            <span>Chỉ dẫn</span>
           </Button>
+
           <Button
-            variant="outline"
-            size="sm"
+            variant="ghost"
+            size="icon"
             onClick={handleRefresh}
-            className="gap-1.5"
+            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+            title="Làm mới thời khóa biểu"
           >
             <RefreshCw className="w-4 h-4" />
-            Làm mới
+            <span className="sr-only">Làm mới</span>
           </Button>
         </div>
       </div>
@@ -501,35 +565,37 @@ export default function SchedulePage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="week" className="mt-0">
+        <div className={activeTab === 'week' ? 'block' : 'hidden'}>
           <WeekView
             sessions={sessions}
             loading={loadingSessions}
+            active={activeTab === 'week'}
             onSelectSession={setSelectedSessionId}
             onDateRangeChange={handleDateRangeChange}
             onSessionReschedule={handleSessionReschedule}
           />
-        </TabsContent>
+        </div>
 
-        <TabsContent value="month" className="mt-0">
+        <div className={activeTab === 'month' ? 'block' : 'hidden'}>
           <MonthView
             sessions={sessions}
             assignments={assignments}
             exams={exams}
             loading={loadingSessions}
+            active={activeTab === 'month'}
             onSelectSession={setSelectedSessionId}
             onDateRangeChange={handleDateRangeChange}
           />
-        </TabsContent>
+        </div>
 
-        <TabsContent value="list" className="mt-0">
+        <div className={activeTab === 'list' ? 'block' : 'hidden'}>
           <ListView
             sessions={allSessions}
             courses={courses}
             loading={loadingListSessions}
             onSelectSession={setSelectedSessionId}
           />
-        </TabsContent>
+        </div>
       </Tabs>
 
       <Dialog open={importOpen} onOpenChange={setImportOpen}>

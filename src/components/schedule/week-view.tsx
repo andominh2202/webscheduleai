@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin, { type EventResizeDoneArg } from '@fullcalendar/interaction';
@@ -48,6 +48,7 @@ export interface WeekViewSession {
 interface WeekViewProps {
   sessions: WeekViewSession[];
   loading?: boolean;
+  active?: boolean;
   onSelectSession: (sessionId: string) => void;
   onDateRangeChange?: (startDate: Date, endDate: Date) => void;
   onSessionReschedule?: (
@@ -88,6 +89,7 @@ function buildIsoDateTime(dateStr: string, timeStr: string): string {
 export function WeekView({
   sessions,
   loading = false,
+  active = true,
   onSelectSession,
   onDateRangeChange,
   onSessionReschedule,
@@ -97,6 +99,12 @@ export function WeekView({
   const [axisMode, setAxisMode] = useState<'hour' | 'period'>('hour');
   const [compact, setCompact] = useState(true);
   const lastRangeRef = useRef<string>('');
+
+  useEffect(() => {
+    if (active && calendarRef.current) {
+      calendarRef.current.getApi().updateSize();
+    }
+  }, [active]);
 
   const events: EventInput[] = useMemo(() => {
     return sessions.map((session) => {

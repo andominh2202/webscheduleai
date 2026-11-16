@@ -24,10 +24,12 @@ function databaseUrl(): string | undefined {
   }
 }
 
+const url = databaseUrl();
+
 export const prisma =
   globalForPrisma.prisma ??
-  new PrismaClient({
-    datasources: { db: { url: databaseUrl() } },
-  });
+  new PrismaClient(
+    url ? { datasources: { db: { url } } } : undefined
+  );
 
 globalForPrisma.prisma = prisma;

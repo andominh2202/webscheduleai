@@ -102,18 +102,29 @@ export default function SettingsPage() {
     }
   }, []);
 
+  const abortCtrlRef = React.useRef<AbortController | null>(null);
+
   const fetchSemesters = React.useCallback(async () => {
-    setLoading(true);
+    abortCtrlRef.current?.abort();
+    abortCtrlRef.current = new AbortController();
+
+    setSemesters((prev) => {
+      if (prev.length === 0) setLoading(true);
+      return prev;
+    });
+
     try {
-      const res = await fetch('/api/semesters', { cache: 'no-store' });
+      const res = await fetch('/api/semesters', { signal: abortCtrlRef.current.signal });
       if (res.ok) {
         const data = await res.json();
         setSemesters(Array.isArray(data) ? data : []);
       } else {
         toast.error('Không thể tải danh sách học kỳ');
       }
-    } catch {
-      toast.error('Lỗi kết nối khi tải học kỳ');
+    } catch (err: unknown) {
+      if ((err as Error)?.name !== 'AbortError') {
+        toast.error('Lỗi kết nối khi tải học kỳ');
+      }
     } finally {
       setLoading(false);
     }
@@ -121,7 +132,7 @@ export default function SettingsPage() {
 
   const fetchGoogleStatus = React.useCallback(async () => {
     try {
-      const res = await fetch('/api/integrations/google-calendar', { cache: 'no-store' });
+      const res = await fetch('/api/integrations/google-calendar');
       if (res.ok) {
         setGoogleStatus(await res.json());
       }
@@ -132,7 +143,7 @@ export default function SettingsPage() {
 
   const fetchAccount = React.useCallback(async () => {
     try {
-      const res = await fetch('/api/account', { cache: 'no-store' });
+      const res = await fetch('/api/account');
       if (res.ok) {
         const data = await res.json();
         setAccountName(data.name || '');
@@ -147,12 +158,14 @@ export default function SettingsPage() {
     fetchSemesters();
     fetchGoogleStatus();
     fetchAccount();
+    return () => {
+      abortCtrlRef.current?.abort();
+    };
   }, [fetchSemesters, fetchGoogleStatus, fetchAccount]);
 
   const notifySemesterChanged = () => {
     window.dispatchEvent(new CustomEvent('semesters-updated'));
     window.dispatchEvent(new CustomEvent('semester-changed'));
-    router.refresh();
   };
 
   const handleActivate = async (semesterId: string) => {

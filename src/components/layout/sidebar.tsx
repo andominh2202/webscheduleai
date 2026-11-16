@@ -66,7 +66,7 @@ export function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: Side
 
       <aside
         className={cn(
-          'fixed top-0 left-0 z-40 h-screen bg-card border-r flex flex-col transition-all duration-300',
+          'fixed top-0 left-0 z-40 h-screen bg-card border-r flex flex-col transition-[width,transform] duration-200 ease-in-out',
           collapsed ? 'w-[70px]' : 'w-[250px]',
           mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         )}
@@ -93,7 +93,7 @@ export function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: Side
               <Link
                 key={item.href}
                 href={item.href}
-                prefetch={false}
+                prefetch={true}
                 onClick={onMobileClose}
                 className={cn(
                   'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',

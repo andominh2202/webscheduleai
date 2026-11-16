@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin, { type DateClickArg } from '@fullcalendar/interaction';
@@ -91,6 +91,7 @@ interface MonthViewProps {
   assignments: MonthViewAssignment[];
   exams: MonthViewExam[];
   loading?: boolean;
+  active?: boolean;
   onSelectSession: (sessionId: string) => void;
   onDateRangeChange?: (startDate: Date, endDate: Date) => void;
 }
@@ -110,6 +111,7 @@ export function MonthView({
   assignments,
   exams,
   loading = false,
+  active = true,
   onSelectSession,
   onDateRangeChange,
 }: MonthViewProps) {
@@ -119,6 +121,12 @@ export function MonthView({
     format(new Date(), 'yyyy-MM-dd')
   );
   const lastRangeRef = useRef<string>('');
+
+  useEffect(() => {
+    if (active && calendarRef.current) {
+      calendarRef.current.getApi().updateSize();
+    }
+  }, [active]);
 
   const events: EventInput[] = useMemo(() => {
     const sessionEvents: EventInput[] = sessions.map((s) => {

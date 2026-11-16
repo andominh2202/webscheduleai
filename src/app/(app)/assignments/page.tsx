@@ -20,6 +20,7 @@ import {
   PRIORITY_COLORS,
   PRIORITY_LABELS,
 } from '@/lib/utils';
+import { getCached, setCached, invalidateCache } from '@/lib/client-cache';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -61,45 +62,66 @@ function AssignmentsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [assignments, setAssignments] = React.useState<AssignmentItem[]>([]);
-  const [courses, setCourses] = React.useState<AssignmentCourseOption[]>([]);
+  const cachedCourses = getCached<AssignmentCourseOption[]>('/api/courses');
+  const cachedAssignments = getCached<AssignmentItem[]>('/api/assignments');
+
+  const [assignments, setAssignments] = React.useState<AssignmentItem[]>(() => cachedAssignments || []);
+  const [courses, setCourses] = React.useState<AssignmentCourseOption[]>(() => cachedCourses || []);
   const [courseFilter, setCourseFilter] = React.useState<string>('all');
   const [priorityFilter, setPriorityFilter] = React.useState<string>('all');
   const [searchQuery, setSearchQuery] = React.useState('');
-  const [loading, setLoading] = React.useState(true);
+  const [loading, setLoading] = React.useState(() => !cachedAssignments);
 
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editingAssignment, setEditingAssignment] = React.useState<AssignmentItem | null>(null);
 
   const [deletingAssignment, setDeletingAssignment] = React.useState<AssignmentItem | null>(null);
   const [deleting, setDeleting] = React.useState(false);
+  const abortCtrlRef = React.useRef<AbortController | null>(null);
 
   const fetchData = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (courseFilter !== 'all') params.set('courseId', courseFilter);
-      if (priorityFilter !== 'all') params.set('priority', priorityFilter);
-      const queryStr = params.toString() ? `?${params.toString()}` : '';
+    abortCtrlRef.current?.abort();
+    abortCtrlRef.current = new AbortController();
 
+    const params = new URLSearchParams();
+    if (courseFilter !== 'all') params.set('courseId', courseFilter);
+    if (priorityFilter !== 'all') params.set('priority', priorityFilter);
+    const queryStr = params.toString() ? `?${params.toString()}` : '';
+    const assignUrl = `/api/assignments${queryStr}`;
+
+    setAssignments((prev) => {
+      const cached = getCached<AssignmentItem[]>(assignUrl);
+      if (cached) return cached;
+      if (prev.length === 0) setLoading(true);
+      return prev;
+    });
+
+    try {
       const [courseRes, assignRes] = await Promise.all([
-        fetch('/api/courses'),
-        fetch(`/api/assignments${queryStr}`),
+        fetch('/api/courses', { signal: abortCtrlRef.current.signal }),
+        fetch(assignUrl, { signal: abortCtrlRef.current.signal }),
       ]);
 
       if (courseRes.ok) {
         const cData = await courseRes.json();
-        setCourses(Array.isArray(cData) ? cData : []);
+        const list = Array.isArray(cData) ? cData : [];
+        setCourses(list);
+        setCached('/api/courses', list);
       }
 
       if (assignRes.ok) {
         const aData = await assignRes.json();
-        setAssignments(Array.isArray(aData) ? aData : []);
+        const list = Array.isArray(aData) ? aData : [];
+        setAssignments(list);
+        setCached(assignUrl, list);
+        if (!queryStr) setCached('/api/assignments', list);
       } else {
         toast.error('Không thể tải danh sách bài tập');
       }
-    } catch {
-      toast.error('Lỗi kết nối khi tải bài tập');
+    } catch (err: unknown) {
+      if ((err as Error)?.name !== 'AbortError') {
+        toast.error('Lỗi kết nối khi tải bài tập');
+      }
     } finally {
       setLoading(false);
     }
@@ -107,6 +129,15 @@ function AssignmentsPageContent() {
 
   React.useEffect(() => {
     fetchData();
+    return () => {
+      abortCtrlRef.current?.abort();
+    };
+  }, [fetchData]);
+
+  React.useEffect(() => {
+    const handleSemChange = () => fetchData();
+    window.addEventListener('semester-changed', handleSemChange);
+    return () => window.removeEventListener('semester-changed', handleSemChange);
   }, [fetchData]);
 
   React.useEffect(() => {
@@ -129,6 +160,8 @@ function AssignmentsPageContent() {
         body: JSON.stringify({ completed: nextCompleted }),
       });
       if (!res.ok) throw new Error();
+      invalidateCache('/api/assignments');
+      invalidateCache('/api/dashboard');
       toast.success(
         nextCompleted ? 'Đã đánh dấu hoàn thành bài tập' : 'Đã chuyển về chưa hoàn thành'
       );
@@ -148,7 +181,11 @@ function AssignmentsPageContent() {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error();
+      invalidateCache('/api/assignments');
+      invalidateCache('/api/dashboard');
       toast.success(`Đã xóa bài tập "${deletingAssignment.title}"`);
+      invalidateCache('/api/assignments');
+      invalidateCache('/api/dashboard');
       setDeletingAssignment(null);
       fetchData();
     } catch {
@@ -484,7 +521,11 @@ function AssignmentsPageContent() {
         onOpenChange={setDialogOpen}
         assignment={editingAssignment}
         courses={courses}
-        onSaved={fetchData}
+        onSaved={() => {
+          invalidateCache('/api/assignments');
+          invalidateCache('/api/dashboard');
+          fetchData();
+        }}
       />
 
       {/* Delete Confirmation */}

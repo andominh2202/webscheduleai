@@ -1,19 +1,63 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { SessionProvider } from 'next-auth/react';
+import type { Session } from 'next-auth';
 import { ThemeProvider } from 'next-themes';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { toast } from '@/components/ui/toast';
 
-export function Providers({ children }: { children: React.ReactNode }) {
+interface ProvidersProps {
+  children: React.ReactNode;
+  session?: Session | null;
+}
+
+export function Providers({ children, session }: ProvidersProps) {
+  const lastKeyTimeRef = useRef(0);
+
   useEffect(() => {
+    // 1. Clean up any stale or lingering service workers to avoid reload loops
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        for (const registration of registrations) {
+          registration.unregister().catch(() => {});
+        }
+      }).catch(() => {});
     }
+
+    // 2. Debounce rapid repeated F5 / Ctrl+R to avoid spamming page reloads and browser freezes
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isReload =
+        e.key === 'F5' ||
+        ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R'));
+
+      if (!isReload) return;
+
+      const now = Date.now();
+      const lastSessionReload = Number(sessionStorage.getItem('__ws_last_reload') || '0');
+      const diffKey = now - lastKeyTimeRef.current;
+      const diffSession = now - lastSessionReload;
+      lastKeyTimeRef.current = now;
+
+      // Prevent spamming reloads within 1.2s
+      if (diffKey < 1200 || diffSession < 1200) {
+        e.preventDefault();
+        e.stopPropagation();
+        toast.info('Trang vừa được tải, vui lòng không nhấn F5 quá nhanh.');
+        return false;
+      }
+
+      sessionStorage.setItem('__ws_last_reload', String(now));
+    };
+
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, { capture: true });
+    };
   }, []);
 
   return (
-    <SessionProvider>
+    <SessionProvider session={session} refetchOnWindowFocus={false} refetchWhenOffline={false}>
       <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
         <TooltipProvider delayDuration={0}>
           {children}

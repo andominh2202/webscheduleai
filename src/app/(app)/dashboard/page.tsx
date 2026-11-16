@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   BookOpen,
@@ -38,6 +38,7 @@ import {
   PRIORITY_LABELS,
   SESSION_STATUS_LABELS,
 } from '@/lib/utils';
+import { getCached, setCached } from '@/lib/client-cache';
 
 
 const SessionDetailPanel = dynamic(() => import('@/components/sessions/session-detail-panel').then((m) => m.SessionDetailPanel), { ssr: false });
@@ -242,17 +243,32 @@ function DashboardSkeleton() {
 }
 
 export default function DashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cachedData = getCached<DashboardData>('/api/dashboard');
+  const [data, setData] = useState<DashboardData | null>(() => cachedData || null);
+  const [loading, setLoading] = useState(() => !cachedData);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState<Date>(() => new Date());
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const isFetchingRef = useRef(false);
+  const abortCtrlRef = useRef<AbortController | null>(null);
+  const dataRef = useRef<DashboardData | null>(cachedData || null);
 
-  const fetchDashboard = useCallback(async () => {
-    setLoading(true);
+  const fetchDashboard = useCallback(async (isSilent = false) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+
+    abortCtrlRef.current?.abort();
+    abortCtrlRef.current = new AbortController();
+
+    if (!isSilent && !dataRef.current) {
+      setLoading(true);
+    }
     setError(null);
+
     try {
-      const res = await fetch('/api/dashboard', { cache: 'no-store' });
+      const res = await fetch('/api/dashboard', {
+        signal: abortCtrlRef.current.signal,
+      });
       if (!res.ok) {
         throw new Error('Không thể tải dữ liệu tổng quan');
       }
@@ -276,7 +292,7 @@ export default function DashboardPage() {
             ? raw.pendingAssignments.length
             : Number(raw.pendingAssignmentsCount ?? 0);
 
-      let nearestDeadlines: AssignmentItem[] = Array.isArray(raw.nearestDeadlines)
+      const nearestDeadlines: AssignmentItem[] = Array.isArray(raw.nearestDeadlines)
         ? raw.nearestDeadlines
         : Array.isArray(raw.upcomingAssignments)
           ? raw.upcomingAssignments
@@ -286,124 +302,51 @@ export default function DashboardPage() {
               ? [raw.nearestDeadline]
               : [];
 
-      let upcomingExamsCount: number | undefined =
-        typeof raw.upcomingExamsCount === 'number'
-          ? raw.upcomingExamsCount
-          : Array.isArray(raw.upcomingExams)
-            ? raw.upcomingExams.length
-            : undefined;
+      const upcomingExamsCount = Number(raw.upcomingExamsCount ?? 0);
+      const completedSessionsCount = Number(raw.completedSessionsCount ?? 0);
+      const totalSessionsCount = Number(raw.totalSessionsCount ?? 0);
 
-      let completedSessionsCount: number | undefined =
-        typeof raw.completedSessionsCount === 'number'
-          ? raw.completedSessionsCount
-          : typeof raw.completedSessions === 'number'
-            ? raw.completedSessions
-            : undefined;
-
-      let totalSessionsCount: number | undefined =
-        typeof raw.totalSessionsCount === 'number'
-          ? raw.totalSessionsCount
-          : typeof raw.totalSessions === 'number'
-            ? raw.totalSessions
-            : undefined;
-
-      // Fallback fetches only when optional fields aren't provided by /api/dashboard
-      const fallbackPromises: Promise<void>[] = [];
-
-      if (upcomingExamsCount === undefined) {
-        fallbackPromises.push(
-          fetch('/api/exams', { cache: 'no-store' })
-            .then((r) => (r.ok ? r.json() : []))
-            .then((exams: Array<{ date: string }>) => {
-              if (Array.isArray(exams)) {
-                const startOfToday = new Date();
-                startOfToday.setHours(0, 0, 0, 0);
-                upcomingExamsCount = exams.filter(
-                  (e) => new Date(e.date) >= startOfToday
-                ).length;
-              } else {
-                upcomingExamsCount = 0;
-              }
-            })
-            .catch(() => {
-              upcomingExamsCount = 0;
-            })
-        );
-      }
-
-      if (nearestDeadlines.length <= 1 && pendingAssignmentsCount > nearestDeadlines.length && !Array.isArray(raw.nearestDeadlines)) {
-        fallbackPromises.push(
-          fetch('/api/assignments?completed=false', { cache: 'no-store' })
-            .then((r) => (r.ok ? r.json() : []))
-            .then((assignments: AssignmentItem[]) => {
-              if (Array.isArray(assignments) && assignments.length > 0) {
-                nearestDeadlines = [...assignments]
-                  .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
-                  .slice(0, 5);
-              }
-            })
-            .catch(() => {
-              // keep existing nearestDeadlines
-            })
-        );
-      }
-
-      if (completedSessionsCount === undefined || totalSessionsCount === undefined) {
-        fallbackPromises.push(
-          fetch('/api/sessions', { cache: 'no-store' })
-            .then((r) => (r.ok ? r.json() : []))
-            .then((sessions: Array<{ status: string }>) => {
-              if (Array.isArray(sessions)) {
-                const validSessions = sessions.filter((s) => s.status !== 'cancelled');
-                totalSessionsCount = validSessions.length;
-                completedSessionsCount = validSessions.filter(
-                  (s) => s.status === 'completed'
-                ).length;
-              } else {
-                totalSessionsCount = 0;
-                completedSessionsCount = 0;
-              }
-            })
-            .catch(() => {
-              totalSessionsCount = 0;
-              completedSessionsCount = 0;
-            })
-        );
-      }
-
-      if (fallbackPromises.length > 0) {
-        await Promise.all(fallbackPromises);
-      }
-
-      setData({
+      const nextData: DashboardData = {
         coursesCount,
         weeklySessionsCount,
         pendingAssignmentsCount,
-        upcomingExamsCount: upcomingExamsCount ?? 0,
+        upcomingExamsCount,
         todaySessions: [...todaySessions].sort((a, b) =>
           normalizeTime(a.startTime).localeCompare(normalizeTime(b.startTime))
         ),
         nextSession,
         nearestDeadlines: nearestDeadlines.slice(0, 5),
         recentNotes: recentNotes.slice(0, 5),
-        completedSessionsCount: completedSessionsCount ?? 0,
-        totalSessionsCount: totalSessionsCount ?? 0,
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Đã xảy ra lỗi khi tải dữ liệu');
+        completedSessionsCount,
+        totalSessionsCount,
+      };
+
+      dataRef.current = nextData;
+      setCached('/api/dashboard', nextData);
+      setData(nextData);
+    } catch (err: unknown) {
+      if ((err as Error)?.name !== 'AbortError') {
+        setError(err instanceof Error ? err.message : 'Đã xảy ra lỗi khi tải dữ liệu');
+      }
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     fetchDashboard();
+    return () => {
+      abortCtrlRef.current?.abort();
+    };
   }, [fetchDashboard]);
 
   useEffect(() => {
-    const handler = () => fetchDashboard();
+    const handler = () => fetchDashboard(true);
     window.addEventListener('semester-changed', handler);
-    return () => window.removeEventListener('semester-changed', handler);
+    return () => {
+      window.removeEventListener('semester-changed', handler);
+    };
   }, [fetchDashboard]);
 
   // Update live countdown every 30 seconds
@@ -433,7 +376,7 @@ export default function DashboardPage() {
           <p className="text-sm text-destructive font-medium">
             {error || 'Không thể tải dữ liệu bảng điều khiển'}
           </p>
-          <Button onClick={fetchDashboard} variant="outline" className="gap-2">
+          <Button onClick={() => fetchDashboard()} variant="outline" className="gap-2">
             <RefreshCw className="w-4 h-4" />
             Thử lại
           </Button>
@@ -488,7 +431,7 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={fetchDashboard} className="gap-1.5">
+          <Button variant="outline" size="sm" onClick={() => fetchDashboard()} className="gap-1.5">
             <RefreshCw className="w-4 h-4" />
             Làm mới
           </Button>

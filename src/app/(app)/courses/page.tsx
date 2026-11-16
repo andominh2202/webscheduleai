@@ -17,6 +17,7 @@ import {
   User,
 } from 'lucide-react';
 import { getDayName, parseGradingBreakdown } from '@/lib/utils';
+import { getCached, setCached, invalidateCache } from '@/lib/client-cache';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -53,11 +54,14 @@ function CoursesPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [courses, setCourses] = React.useState<CourseItem[]>([]);
-  const [semesters, setSemesters] = React.useState<SemesterOption[]>([]);
+  const cachedCourses = getCached<CourseItem[]>('/api/courses');
+  const cachedSemesters = getCached<SemesterOption[]>('/api/semesters');
+
+  const [courses, setCourses] = React.useState<CourseItem[]>(() => cachedCourses || []);
+  const [semesters, setSemesters] = React.useState<SemesterOption[]>(() => cachedSemesters || []);
   const [selectedSemesterId, setSelectedSemesterId] = React.useState<string>('all');
   const [searchQuery, setSearchQuery] = React.useState('');
-  const [loading, setLoading] = React.useState(true);
+  const [loading, setLoading] = React.useState(() => !cachedCourses);
 
   // Form dialog state
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -67,31 +71,49 @@ function CoursesPageContent() {
   const [deletingCourse, setDeletingCourse] = React.useState<CourseItem | null>(null);
   const [deleting, setDeleting] = React.useState(false);
 
+  const abortCtrlRef = React.useRef<AbortController | null>(null);
+
   const fetchData = React.useCallback(async (semesterFilter?: string) => {
-    setLoading(true);
+    abortCtrlRef.current?.abort();
+    abortCtrlRef.current = new AbortController();
+
+    const courseUrl =
+      semesterFilter && semesterFilter !== 'all'
+        ? `/api/courses?semesterId=${encodeURIComponent(semesterFilter)}`
+        : '/api/courses';
+
+    setCourses((prev) => {
+      const cached = getCached<CourseItem[]>(courseUrl);
+      if (cached) return cached;
+      if (prev.length === 0) setLoading(true);
+      return prev;
+    });
+
     try {
       const [semRes, courseRes] = await Promise.all([
-        fetch('/api/semesters'),
-        fetch(
-          semesterFilter && semesterFilter !== 'all'
-            ? `/api/courses?semesterId=${encodeURIComponent(semesterFilter)}`
-            : '/api/courses'
-        ),
+        fetch('/api/semesters', { signal: abortCtrlRef.current.signal }),
+        fetch(courseUrl, { signal: abortCtrlRef.current.signal }),
       ]);
 
       if (semRes.ok) {
         const semData: SemesterOption[] = await semRes.json();
-        setSemesters(Array.isArray(semData) ? semData : []);
+        const list = Array.isArray(semData) ? semData : [];
+        setSemesters(list);
+        setCached('/api/semesters', list);
       }
 
       if (courseRes.ok) {
         const courseData: CourseItem[] = await courseRes.json();
-        setCourses(Array.isArray(courseData) ? courseData : []);
+        const list = Array.isArray(courseData) ? courseData : [];
+        setCourses(list);
+        setCached(courseUrl, list);
       } else {
         toast.error('Không thể tải danh sách môn học');
       }
-    } catch {
-      toast.error('Lỗi kết nối khi tải môn học');
+    } catch (err: unknown) {
+      if ((err as Error)?.name !== 'AbortError') {
+        toast.error('Lỗi kết nối khi tải môn học');
+      }
     } finally {
       setLoading(false);
     }
@@ -99,6 +121,15 @@ function CoursesPageContent() {
 
   React.useEffect(() => {
     fetchData(selectedSemesterId);
+    return () => {
+      abortCtrlRef.current?.abort();
+    };
+  }, [fetchData, selectedSemesterId]);
+
+  React.useEffect(() => {
+    const handleSemChange = () => fetchData(selectedSemesterId);
+    window.addEventListener('semester-changed', handleSemChange);
+    return () => window.removeEventListener('semester-changed', handleSemChange);
   }, [fetchData, selectedSemesterId]);
 
   React.useEffect(() => {
@@ -131,6 +162,9 @@ function CoursesPageContent() {
         throw new Error(data?.error || 'Không thể xóa môn học');
       }
       toast.success(`Đã xóa môn "${deletingCourse.name}"`);
+      invalidateCache('/api/courses');
+      invalidateCache('/api/schedule-overview');
+      invalidateCache('/api/dashboard');
       setDeletingCourse(null);
       fetchData(selectedSemesterId);
     } catch (err) {
@@ -430,7 +464,12 @@ function CoursesPageContent() {
         course={editingCourse}
         semesters={semesters}
         existingCourses={courses}
-        onSaved={() => fetchData(selectedSemesterId)}
+        onSaved={() => {
+          invalidateCache('/api/courses');
+          invalidateCache('/api/schedule-overview');
+          invalidateCache('/api/dashboard');
+          fetchData(selectedSemesterId);
+        }}
       />
 
       {/* Delete Confirmation Dialog */}

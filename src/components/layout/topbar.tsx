@@ -44,6 +44,7 @@ import {
 } from '@/components/ui/popover';
 import { toast } from '@/components/ui/toast';
 import { cn, formatShortDate } from '@/lib/utils';
+import { getCached, setCached, invalidateCache } from '@/lib/client-cache';
 import { MobileMenuButton } from './sidebar';
 
 interface Semester {
@@ -80,8 +81,15 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
-  const [semesters, setSemesters] = useState<Semester[]>([]);
-  const [activeSemester, setActiveSemester] = useState<string>('');
+  const cachedSemesters = getCached<Semester[]>('/api/semesters');
+  const [semesters, setSemesters] = useState<Semester[]>(() => cachedSemesters || []);
+  const [activeSemester, setActiveSemester] = useState<string>(() => {
+    if (cachedSemesters && cachedSemesters.length > 0) {
+      const active = cachedSemesters.find((s) => s.isActive);
+      return active ? active.id : cachedSemesters[0].id;
+    }
+    return '';
+  });
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -94,6 +102,9 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
   const [urgentCount, setUrgentCount] = useState(0);
   const [browserNotifyEnabled, setBrowserNotifyEnabled] = useState(false);
   const notifiedIdsRef = useRef<Set<string>>(new Set());
+  const fetchingNotificationsRef = useRef(false);
+  const abortSemestersRef = useRef<AbortController | null>(null);
+  const abortNotificationsRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -103,23 +114,39 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
   }, []);
 
   const fetchSemesters = useCallback(async () => {
+    abortSemestersRef.current?.abort();
+    abortSemestersRef.current = new AbortController();
+
     try {
-      const res = await fetch('/api/semesters', { cache: 'no-store' });
+      const res = await fetch('/api/semesters', {
+        signal: abortSemestersRef.current.signal,
+      });
       if (res.ok) {
         const data = await res.json();
-        setSemesters(Array.isArray(data) ? data : []);
-        const active = data.find((s: Semester) => s.isActive);
+        const list: Semester[] = Array.isArray(data) ? data : [];
+        setSemesters(list);
+        setCached('/api/semesters', list);
+        const active = list.find((s: Semester) => s.isActive);
         if (active) setActiveSemester(active.id);
-        else if (data.length > 0) setActiveSemester(data[0].id);
+        else if (list.length > 0) setActiveSemester(list[0].id);
       }
-    } catch {
-      // ignore
+    } catch (e: unknown) {
+      if ((e as Error)?.name !== 'AbortError') {
+        // ignore network error
+      }
     }
   }, []);
 
   const fetchNotifications = useCallback(async () => {
+    if (fetchingNotificationsRef.current) return;
+    fetchingNotificationsRef.current = true;
+    abortNotificationsRef.current?.abort();
+    abortNotificationsRef.current = new AbortController();
+
     try {
-      const res = await fetch('/api/notifications', { cache: 'no-store' });
+      const res = await fetch('/api/notifications', {
+        signal: abortNotificationsRef.current.signal,
+      });
       if (res.ok) {
         const data = await res.json();
         const list: NotificationItem[] = Array.isArray(data.items) ? data.items : [];
@@ -146,8 +173,12 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
           }
         }
       }
-    } catch {
-      // ignore
+    } catch (e: unknown) {
+      if ((e as Error)?.name !== 'AbortError') {
+        // ignore
+      }
+    } finally {
+      fetchingNotificationsRef.current = false;
     }
   }, []);
 
@@ -162,6 +193,8 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
 
     return () => {
       clearInterval(interval);
+      abortSemestersRef.current?.abort();
+      abortNotificationsRef.current?.abort();
       window.removeEventListener('semesters-updated', onSemUpdate);
       window.removeEventListener('semester-changed', onSemUpdate);
     };
@@ -197,12 +230,12 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
 
   const handleSemesterChange = async (value: string) => {
     setActiveSemester(value);
+    invalidateCache();
     try {
       const res = await fetch(`/api/semesters/${value}/activate`, { method: 'POST' });
       if (res.ok) {
         toast.success('Đã chuyển học kỳ hiện tại');
         window.dispatchEvent(new CustomEvent('semester-changed', { detail: value }));
-        router.refresh();
       }
     } catch {
       toast.error('Không thể đổi học kỳ');

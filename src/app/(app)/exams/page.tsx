@@ -16,6 +16,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { cn, EXAM_TYPE_LABELS, formatShortDate } from '@/lib/utils';
+import { getCached, setCached, invalidateCache } from '@/lib/client-cache';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -63,45 +64,66 @@ function ExamsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [exams, setExams] = React.useState<ExamItem[]>([]);
-  const [courses, setCourses] = React.useState<ExamCourseOption[]>([]);
+  const cachedCourses = getCached<ExamCourseOption[]>('/api/courses');
+  const cachedExams = getCached<ExamItem[]>('/api/exams');
+
+  const [exams, setExams] = React.useState<ExamItem[]>(() => cachedExams || []);
+  const [courses, setCourses] = React.useState<ExamCourseOption[]>(() => cachedCourses || []);
   const [courseFilter, setCourseFilter] = React.useState<string>('all');
   const [typeFilter, setTypeFilter] = React.useState<string>('all');
   const [searchQuery, setSearchQuery] = React.useState('');
-  const [loading, setLoading] = React.useState(true);
+  const [loading, setLoading] = React.useState(() => !cachedExams);
 
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editingExam, setEditingExam] = React.useState<ExamItem | null>(null);
 
   const [deletingExam, setDeletingExam] = React.useState<ExamItem | null>(null);
   const [deleting, setDeleting] = React.useState(false);
+  const abortCtrlRef = React.useRef<AbortController | null>(null);
 
   const fetchData = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (courseFilter !== 'all') params.set('courseId', courseFilter);
-      if (typeFilter !== 'all') params.set('type', typeFilter);
-      const queryStr = params.toString() ? `?${params.toString()}` : '';
+    abortCtrlRef.current?.abort();
+    abortCtrlRef.current = new AbortController();
 
+    const params = new URLSearchParams();
+    if (courseFilter !== 'all') params.set('courseId', courseFilter);
+    if (typeFilter !== 'all') params.set('type', typeFilter);
+    const queryStr = params.toString() ? `?${params.toString()}` : '';
+    const examUrl = `/api/exams${queryStr}`;
+
+    setExams((prev) => {
+      const cached = getCached<ExamItem[]>(examUrl);
+      if (cached) return cached;
+      if (prev.length === 0) setLoading(true);
+      return prev;
+    });
+
+    try {
       const [courseRes, examRes] = await Promise.all([
-        fetch('/api/courses'),
-        fetch(`/api/exams${queryStr}`),
+        fetch('/api/courses', { signal: abortCtrlRef.current.signal }),
+        fetch(examUrl, { signal: abortCtrlRef.current.signal }),
       ]);
 
       if (courseRes.ok) {
         const cData = await courseRes.json();
-        setCourses(Array.isArray(cData) ? cData : []);
+        const list = Array.isArray(cData) ? cData : [];
+        setCourses(list);
+        setCached('/api/courses', list);
       }
 
       if (examRes.ok) {
         const eData = await examRes.json();
-        setExams(Array.isArray(eData) ? eData : []);
+        const list = Array.isArray(eData) ? eData : [];
+        setExams(list);
+        setCached(examUrl, list);
+        if (!queryStr) setCached('/api/exams', list);
       } else {
         toast.error('Không thể tải danh sách lịch thi');
       }
-    } catch {
-      toast.error('Lỗi kết nối khi tải lịch thi');
+    } catch (err: unknown) {
+      if ((err as Error)?.name !== 'AbortError') {
+        toast.error('Lỗi kết nối khi tải lịch thi');
+      }
     } finally {
       setLoading(false);
     }
@@ -109,6 +131,15 @@ function ExamsPageContent() {
 
   React.useEffect(() => {
     fetchData();
+    return () => {
+      abortCtrlRef.current?.abort();
+    };
+  }, [fetchData]);
+
+  React.useEffect(() => {
+    const handleSemChange = () => fetchData();
+    window.addEventListener('semester-changed', handleSemChange);
+    return () => window.removeEventListener('semester-changed', handleSemChange);
   }, [fetchData]);
 
   React.useEffect(() => {
@@ -128,6 +159,8 @@ function ExamsPageContent() {
       });
       if (!res.ok) throw new Error();
       toast.success(`Đã xóa lịch thi "${deletingExam.title}"`);
+      invalidateCache('/api/exams');
+      invalidateCache('/api/dashboard');
       setDeletingExam(null);
       fetchData();
     } catch {
@@ -462,7 +495,11 @@ function ExamsPageContent() {
         onOpenChange={setDialogOpen}
         exam={editingExam}
         courses={courses}
-        onSaved={fetchData}
+        onSaved={() => {
+          invalidateCache('/api/exams');
+          invalidateCache('/api/dashboard');
+          fetchData();
+        }}
       />
 
       {/* Delete Confirmation */}
