@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Loader2 } from 'lucide-react';
+import { GraduationCap, Loader2, Sparkles } from 'lucide-react';
 import { ExamFormData, examSchema } from '@/lib/validations';
 import { EXAM_TYPE_LABELS } from '@/lib/utils';
 import {
@@ -48,18 +48,28 @@ export interface ExamItem {
   course?: ExamCourseOption;
 }
 
-function toDateInputValue(dateStr?: string | null): string {
-  if (!dateStr) {
-    const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    return nextWeek.toISOString().slice(0, 10);
-  }
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
+function formatLocalYmd(d: Date): string {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
+
+function toDateInputValue(dateStr?: string | null, offsetDays = 7): string {
+  if (!dateStr) {
+    return formatLocalYmd(new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000));
+  }
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return formatLocalYmd(new Date());
+  return formatLocalYmd(d);
+}
+
+const EXAM_TITLE_PRESETS: Array<{ label: string; type: ExamFormData['type'] }> = [
+  { label: 'Thi giữa kỳ', type: 'midterm' },
+  { label: 'Thi cuối kỳ', type: 'final' },
+  { label: 'Kiểm tra quá trình', type: 'quiz' },
+  { label: 'Bảo vệ đồ án', type: 'other' },
+];
 
 export interface ExamFormDialogProps {
   open: boolean;
@@ -99,6 +109,7 @@ export function ExamFormDialog({
     control,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors },
   } = form;
 
@@ -172,30 +183,61 @@ export function ExamFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[calc(100vw-1.5rem)] max-w-lg max-h-[90dvh] overflow-y-auto p-5 sm:p-6">
         <DialogHeader>
-          <DialogTitle>{isEdit ? 'Chỉnh sửa lịch thi' : 'Thêm lịch thi mới'}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <GraduationCap className="h-5 w-5 text-primary shrink-0" />
+            {isEdit ? 'Chỉnh sửa lịch thi' : 'Thêm lịch thi mới'}
+          </DialogTitle>
           <DialogDescription>
             Cập nhật ngày thi, phòng thi và các lưu ý quan trọng cho kỳ thi.
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div className="space-y-1.5">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 pt-1" noValidate>
+          <div className="space-y-2">
             <Label htmlFor="exam-title">
               Tên kỳ thi <span className="text-destructive">*</span>
             </Label>
             <Input
               id="exam-title"
               placeholder="VD: Thi giữa kỳ môn Giải tích"
+              aria-invalid={Boolean(errors.title)}
+              aria-describedby={errors.title ? 'exam-title-error' : undefined}
               {...register('title')}
             />
             {errors.title && (
-              <p className="text-xs text-destructive">{errors.title.message}</p>
+              <p id="exam-title-error" role="alert" className="text-xs text-destructive">
+                {errors.title.message}
+              </p>
+            )}
+            {!isEdit && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <Sparkles className="h-3 w-3" />
+                  Điền nhanh:
+                </span>
+                {EXAM_TITLE_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => {
+                      setValue('title', preset.label, {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      });
+                      setValue('type', preset.type, { shouldDirty: true });
+                    }}
+                    className="rounded-full border bg-muted/40 px-2.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div className="space-y-1.5">
               <Label htmlFor="exam-course">
                 Môn học <span className="text-destructive">*</span>
@@ -205,7 +247,11 @@ export function ExamFormDialog({
                 name="courseId"
                 render={({ field }) => (
                   <Select value={field.value} onValueChange={field.onChange}>
-                    <SelectTrigger id="exam-course">
+                    <SelectTrigger
+                      id="exam-course"
+                      aria-invalid={Boolean(errors.courseId)}
+                      aria-describedby={errors.courseId ? 'exam-course-error' : undefined}
+                    >
                       <SelectValue placeholder="Chọn môn học" />
                     </SelectTrigger>
                     <SelectContent>
@@ -221,7 +267,7 @@ export function ExamFormDialog({
                                 className="h-2.5 w-2.5 rounded-full shrink-0"
                                 style={{ backgroundColor: c.color || '#3b82f6' }}
                               />
-                              <span>{c.name}</span>
+                              <span className="truncate">{c.name}</span>
                             </div>
                           </SelectItem>
                         ))
@@ -231,7 +277,9 @@ export function ExamFormDialog({
                 )}
               />
               {errors.courseId && (
-                <p className="text-xs text-destructive">{errors.courseId.message}</p>
+                <p id="exam-course-error" role="alert" className="text-xs text-destructive">
+                  {errors.courseId.message}
+                </p>
               )}
             </div>
 
@@ -258,14 +306,22 @@ export function ExamFormDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="space-y-1.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+            <div className="space-y-1.5 col-span-2 sm:col-span-1">
               <Label htmlFor="exam-date">
                 Ngày thi <span className="text-destructive">*</span>
               </Label>
-              <Input id="exam-date" type="date" {...register('date')} />
+              <Input
+                id="exam-date"
+                type="date"
+                aria-invalid={Boolean(errors.date)}
+                aria-describedby={errors.date ? 'exam-date-error' : undefined}
+                {...register('date')}
+              />
               {errors.date && (
-                <p className="text-xs text-destructive">{errors.date.message}</p>
+                <p id="exam-date-error" role="alert" className="text-xs text-destructive">
+                  {errors.date.message}
+                </p>
               )}
             </div>
 
@@ -280,7 +336,7 @@ export function ExamFormDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div className="space-y-1.5">
               <Label htmlFor="exam-room">Phòng thi</Label>
               <Input id="exam-room" placeholder="VD: Hội trường A2" {...register('room')} />
@@ -297,25 +353,30 @@ export function ExamFormDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="exam-notes">Ghi chú thi</Label>
+            <Label htmlFor="exam-notes">Ghi chú & Quy định phòng thi</Label>
             <Textarea
               id="exam-notes"
               placeholder="Hình thức thi (tự luận/trắc nghiệm), tài liệu được mang vào, số báo danh..."
-              className="min-h-[80px]"
+              className="min-h-[76px] resize-y"
               {...register('notes')}
             />
           </div>
 
-          <DialogFooter className="gap-2 pt-2">
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2 pt-2">
             <Button
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
               disabled={submitting}
+              className="w-full sm:w-auto"
             >
               Hủy
             </Button>
-            <Button type="submit" disabled={submitting || courses.length === 0}>
+            <Button
+              type="submit"
+              disabled={submitting || courses.length === 0}
+              className="w-full sm:w-auto"
+            >
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {isEdit ? 'Lưu thay đổi' : 'Thêm lịch thi'}
             </Button>
@@ -325,4 +386,3 @@ export function ExamFormDialog({
     </Dialog>
   );
 }
-

@@ -32,7 +32,12 @@ export async function GET() {
           status: 'upcoming',
           date: { gte: todayStart, lte: tomorrowEnd },
         },
-        include: {
+        select: {
+          id: true,
+          date: true,
+          startTime: true,
+          endTime: true,
+          room: true,
           course: { select: { name: true, color: true } },
         },
         orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
@@ -44,7 +49,10 @@ export async function GET() {
           completed: false,
           dueDate: { lte: threeDaysEnd },
         },
-        include: {
+        select: {
+          id: true,
+          title: true,
+          dueDate: true,
           course: { select: { name: true, color: true } },
         },
         orderBy: { dueDate: 'asc' },
@@ -55,7 +63,12 @@ export async function GET() {
           userId,
           date: { gte: todayStart, lte: sevenDaysEnd },
         },
-        include: {
+        select: {
+          id: true,
+          title: true,
+          date: true,
+          startTime: true,
+          room: true,
           course: { select: { name: true, color: true } },
         },
         orderBy: { date: 'asc' },
@@ -64,11 +77,15 @@ export async function GET() {
     ]);
 
     const items: NotificationItem[] = [];
+    let urgentCount = 0;
 
     for (const a of pendingAssignments) {
       const dueKey = toVnDateString(a.dueDate);
       const isOverdue = dueKey < todayKey;
       const isToday = dueKey === todayKey;
+      const urgent = isOverdue || isToday;
+      if (urgent) urgentCount += 1;
+
       items.push({
         id: `assign-${a.id}`,
         kind: isOverdue ? 'assignment_overdue' : 'assignment_upcoming',
@@ -76,13 +93,16 @@ export async function GET() {
         subtitle: `${a.course.name} • ${dueKey.split('-').reverse().join('/')}`,
         href: '/assignments',
         time: a.dueDate.toISOString(),
-        urgent: isOverdue || isToday,
+        urgent,
         color: a.course.color,
       });
     }
 
     for (const e of upcomingExams) {
       const dateKey = toVnDateString(e.date);
+      const urgent = dateKey === todayKey;
+      if (urgent) urgentCount += 1;
+
       items.push({
         id: `exam-${e.id}`,
         kind: 'exam',
@@ -90,7 +110,7 @@ export async function GET() {
         subtitle: `${e.course.name} • ${dateKey.split('-').reverse().join('/')}${e.startTime ? ` (${e.startTime})` : ''}${e.room ? ` • P.${e.room}` : ''}`,
         href: '/exams',
         time: e.date.toISOString(),
-        urgent: dateKey === todayKey,
+        urgent,
         color: e.course.color,
       });
     }
@@ -98,12 +118,14 @@ export async function GET() {
     for (const s of upcomingSessions) {
       const dateKey = toVnDateString(s.date);
       const isToday = dateKey === todayKey;
+      if (isToday) urgentCount += 1;
+
       items.push({
         id: `sess-${s.id}`,
         kind: 'session',
         title: `${isToday ? 'Hôm nay' : 'Ngày mai'}: ${s.course.name}`,
         subtitle: `${s.startTime} - ${s.endTime}${s.room ? ` • Phòng ${s.room}` : ''}`,
-        href: `/schedule`,
+        href: '/schedule',
         time: `${dateKey}T${s.startTime}:00+07:00`,
         urgent: isToday,
         color: s.course.color,
@@ -112,11 +134,10 @@ export async function GET() {
 
     return NextResponse.json({
       count: items.length,
-      urgentCount: items.filter((i) => i.urgent).length,
+      urgentCount,
       items,
     });
   } catch (error) {
     return handleApiError(error, 'Không thể tải thông báo');
   }
 }
-

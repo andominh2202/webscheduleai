@@ -45,27 +45,60 @@ export async function POST(req: NextRequest) {
       parsed.endTime
     );
 
-    const session = await prisma.courseSession.create({
-      data: {
-        courseId: parsed.courseId,
-        date,
-        startTime: parsed.startTime,
-        endTime: parsed.endTime,
-        room: parsed.room?.trim() || null,
-        location: parsed.location?.trim() || null,
-        type: parsed.type,
-        status: 'upcoming',
-        content: parsed.content?.trim() || null,
-        personalNote: parsed.personalNote?.trim() || null,
-      },
-      include: {
-        course: {
-          select: { id: true, name: true, courseCode: true, color: true },
+    const dateStr = parsed.date.trim();
+    const lockKey = `makeup:${parsed.courseId}:${dateStr}:${parsed.startTime}`;
+
+    const { session, alreadyExists } = await prisma.$transaction(async (tx) => {
+      // 1. PostgreSQL Advisory Transaction Lock để tuần tự hóa các request tạo buổi bù đồng thời
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+
+      // 2. Kiểm tra bản ghi đã tồn tại trong phạm vi transaction có lock
+      const existing = await tx.courseSession.findFirst({
+        where: {
+          courseId: parsed.courseId,
+          date,
+          startTime: parsed.startTime,
+          status: { not: 'cancelled' },
         },
-      },
+        include: {
+          course: {
+            select: { id: true, name: true, courseCode: true, color: true },
+          },
+        },
+      });
+
+      if (existing) {
+        return { session: existing, alreadyExists: true };
+      }
+
+      // 3. Nếu chưa tồn tại, tạo mới an toàn
+      const created = await tx.courseSession.create({
+        data: {
+          courseId: parsed.courseId,
+          date,
+          startTime: parsed.startTime,
+          endTime: parsed.endTime,
+          room: parsed.room?.trim() || null,
+          location: parsed.location?.trim() || null,
+          type: parsed.type,
+          status: 'upcoming',
+          content: parsed.content?.trim() || null,
+          personalNote: parsed.personalNote?.trim() || null,
+        },
+        include: {
+          course: {
+            select: { id: true, name: true, courseCode: true, color: true },
+          },
+        },
+      });
+
+      return { session: created, alreadyExists: false };
     });
 
-    return NextResponse.json({ ...session, conflicts }, { status: 201 });
+    return NextResponse.json(
+      { ...session, conflicts, alreadyExists },
+      { status: alreadyExists ? 200 : 201 }
+    );
   } catch (error) {
     return handleApiError(error, 'Không thể tạo buổi học bù');
   }

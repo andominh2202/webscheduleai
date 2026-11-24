@@ -27,6 +27,8 @@ function getField(row: RawRow, keys: string[]): string {
   return '';
 }
 
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   try {
     const userId = await requireAuth();
@@ -36,24 +38,6 @@ export async function POST(req: NextRequest) {
 
     if (!file) {
       return NextResponse.json({ error: 'Vui lòng chọn file Excel hoặc CSV' }, { status: 400 });
-    }
-
-    let semester = semesterIdInput
-      ? await prisma.semester.findFirst({ where: { id: semesterIdInput, userId } })
-      : await getActiveSemester(userId);
-
-    if (!semester) {
-      const now = new Date();
-      const end = new Date(now.getTime() + 120 * 86400000);
-      semester = await prisma.semester.create({
-        data: {
-          name: 'Học kỳ mặc định',
-          startDate: parseVnDate(now),
-          endDate: parseVnDate(end),
-          isActive: true,
-          userId,
-        },
-      });
     }
 
     const fileName = file.name.toLowerCase();
@@ -98,115 +82,153 @@ export async function POST(req: NextRequest) {
       return { row, name, courseCode, day, startTime, endTime, from, to };
     });
 
-    let createdCourses = 0;
-    let createdSchedules = 0;
-    let createdSessions = 0;
-    const warnings: string[] = [];
+    // Toàn bộ quá trình ghi CSDL được bọc trong một Transaction duy nhất:
+    // Đảm bảo tính nguyên tử (Atomicity) - nếu có lỗi ở bất kỳ dòng nào, toàn bộ sẽ được rollback sạch sẽ.
+    const importResult = await prisma.$transaction(
+      async (tx) => {
+        let semester = semesterIdInput
+          ? await tx.semester.findFirst({ where: { id: semesterIdInput, userId } })
+          : await getActiveSemester(userId, tx);
 
-    const existingCourses = await prisma.course.findMany({
-      where: { userId, semesterId: semester.id },
-    });
-    const courseByCode = new Map(existingCourses.map((c) => [c.courseCode.toLowerCase(), c]));
+        if (!semester) {
+          const now = new Date();
+          const end = new Date(now.getTime() + 120 * 86400000);
+          semester = await tx.semester.create({
+            data: {
+              name: 'Học kỳ mặc định',
+              startDate: parseVnDate(now),
+              endDate: parseVnDate(end),
+              isActive: true,
+              userId,
+            },
+          });
+        }
 
-    for (let i = 0; i < preparedRows.length; i++) {
-      const { row, name, courseCode, day, startTime, endTime, from, to } = preparedRows[i];
+        let createdCourses = 0;
+        let createdSchedules = 0;
+        let createdSessions = 0;
+        const warnings: string[] = [];
 
-      const instructor = getField(row, ['Giảng viên', 'Giang vien', 'instructor']);
-      const creditsRaw = getField(row, ['Số tín chỉ', 'So tin chi', 'credits']);
-      const colorRaw = getField(row, ['Màu sắc', 'Mau sac', 'color']);
-      const startPeriodRaw = getField(row, ['Tiết bắt đầu', 'Tiet bat dau', 'startPeriod']);
-      const numPeriodsRaw = getField(row, ['Số tiết', 'So tiet', 'numPeriods']);
-      const room = getField(row, ['Phòng học', 'Phong hoc', 'room']);
-      const location = getField(row, ['Địa điểm', 'Dia diem', 'location']);
-      const weekTypeRaw = getField(row, ['Loại tuần', 'Loai tuan', 'weekType']) || 'all';
-
-      let course = courseByCode.get(courseCode.toLowerCase());
-      if (!course) {
-        const color = colorRaw || COURSE_COLORS[createdCourses % COURSE_COLORS.length];
-        course = await prisma.course.create({
-          data: {
-            name,
-            courseCode,
-            instructor: instructor || null,
-            credits: creditsRaw ? Number(creditsRaw) || null : null,
-            color,
-            semesterId: semester.id,
-            userId,
-          },
+        const existingCourses = await tx.course.findMany({
+          where: { userId, semesterId: semester.id },
         });
-        courseByCode.set(courseCode.toLowerCase(), course);
-        createdCourses++;
+        const courseByCode = new Map(existingCourses.map((c) => [c.courseCode.toLowerCase(), c]));
+
+        for (let i = 0; i < preparedRows.length; i++) {
+          const { row, name, courseCode, day, startTime, endTime, from, to } = preparedRows[i];
+
+          const instructor = getField(row, ['Giảng viên', 'Giang vien', 'instructor']);
+          const creditsRaw = getField(row, ['Số tín chỉ', 'So tin chi', 'credits']);
+          const colorRaw = getField(row, ['Màu sắc', 'Mau sac', 'color']);
+          const startPeriodRaw = getField(row, ['Tiết bắt đầu', 'Tiet bat dau', 'startPeriod']);
+          const numPeriodsRaw = getField(row, ['Số tiết', 'So tiet', 'numPeriods']);
+          const room = getField(row, ['Phòng học', 'Phong hoc', 'room']);
+          const location = getField(row, ['Địa điểm', 'Dia diem', 'location']);
+          const weekTypeRaw = getField(row, ['Loại tuần', 'Loai tuan', 'weekType']) || 'all';
+
+          let course = courseByCode.get(courseCode.toLowerCase());
+          if (!course) {
+            const color = colorRaw || COURSE_COLORS[createdCourses % COURSE_COLORS.length];
+            course = await tx.course.create({
+              data: {
+                name,
+                courseCode,
+                instructor: instructor || null,
+                credits: creditsRaw ? Number(creditsRaw) || null : null,
+                color,
+                semesterId: semester.id,
+                userId,
+              },
+            });
+            courseByCode.set(courseCode.toLowerCase(), course);
+            createdCourses++;
+          }
+
+          const dayOfWeek = day;
+          const startDate = from ? parseVnDate(from) : semester.startDate;
+          const endDate = to ? parseVnDate(to) : semester.endDate;
+          const weekType = ['all', 'even', 'odd'].includes(weekTypeRaw) ? weekTypeRaw : 'all';
+
+          // Kiểm tra trùng lặp lịch lặp trong cùng transaction
+          const duplicate = await tx.schedule.findFirst({
+            where: {
+              courseId: course.id,
+              dayOfWeek,
+              startTime,
+              endTime,
+              startDate,
+              endDate,
+              weekType,
+              room: room || null,
+              location: location || null,
+            },
+            select: { id: true },
+          });
+          if (duplicate) {
+            warnings.push(`Dòng ${i + 2} (${name}): Lịch đã tồn tại, đã bỏ qua để tránh trùng.`);
+            continue;
+          }
+
+          const conflicts = await checkScheduleConflicts(
+            {
+              userId,
+              dayOfWeek,
+              startTime,
+              endTime,
+              startDate,
+              endDate,
+              weekType,
+            },
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            tx
+          );
+
+          if (conflicts.length > 0) {
+            warnings.push(
+              `Dòng ${i + 2} (${name}): Trùng giờ với "${conflicts[0].course.name}".`
+            );
+          }
+
+          const schedule = await tx.schedule.create({
+            data: {
+              courseId: course.id,
+              dayOfWeek,
+              startTime,
+              endTime,
+              startPeriod: startPeriodRaw ? Number(startPeriodRaw) || null : null,
+              numPeriods: numPeriodsRaw ? Number(numPeriodsRaw) || null : null,
+              room: room || null,
+              location: location || null,
+              startDate,
+              endDate,
+              weekType,
+            },
+          });
+          createdSchedules++;
+
+          const count = await generateSessions(schedule.id, tx);
+          if (count) createdSessions += count;
+        }
+
+        return {
+          createdCourses,
+          createdSchedules,
+          createdSessions,
+          warnings,
+        };
+      },
+      {
+        maxWait: 5000,
+        timeout: 15000,
       }
-
-      const dayOfWeek = day;
-      const startDate = from ? parseVnDate(from) : semester.startDate;
-      const endDate = to ? parseVnDate(to) : semester.endDate;
-      const weekType = ['all', 'even', 'odd'].includes(weekTypeRaw) ? weekTypeRaw : 'all';
-
-      // Idempotent sequential imports: do not create the same recurring schedule twice.
-      // Keep existing sessions and their notes/checklists untouched.
-      const duplicate = await prisma.schedule.findFirst({
-        where: {
-          courseId: course.id,
-          dayOfWeek,
-          startTime,
-          endTime,
-          startDate,
-          endDate,
-          weekType,
-          room: room || null,
-          location: location || null,
-        },
-        select: { id: true },
-      });
-      if (duplicate) {
-        warnings.push(`Dòng ${i + 2} (${name}): Lịch đã tồn tại, đã bỏ qua để tránh trùng.`);
-        continue;
-      }
-
-      const conflicts = await checkScheduleConflicts({
-        userId,
-        dayOfWeek,
-        startTime,
-        endTime,
-        startDate,
-        endDate,
-        weekType,
-      });
-
-      if (conflicts.length > 0) {
-        warnings.push(
-          `Dòng ${i + 2} (${name}): Trùng giờ với "${conflicts[0].course.name}".`
-        );
-      }
-
-      const schedule = await prisma.schedule.create({
-        data: {
-          courseId: course.id,
-          dayOfWeek,
-          startTime,
-          endTime,
-          startPeriod: startPeriodRaw ? Number(startPeriodRaw) || null : null,
-          numPeriods: numPeriodsRaw ? Number(numPeriodsRaw) || null : null,
-          room: room || null,
-          location: location || null,
-          startDate,
-          endDate,
-          weekType,
-        },
-      });
-      createdSchedules++;
-
-      const count = await generateSessions(schedule.id);
-      if (count) createdSessions += count;
-    }
+    );
 
     return NextResponse.json({
       success: true,
-      createdCourses,
-      createdSchedules,
-      createdSessions,
-      warnings,
+      ...importResult,
     });
   } catch (error) {
     if (error instanceof Error && /^Dòng \d+:/.test(error.message)) {

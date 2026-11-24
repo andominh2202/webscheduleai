@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
@@ -19,6 +19,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Menu,
+  X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -38,7 +39,7 @@ const navItems = [
   { href: '/assignments', label: 'Bài tập', icon: ClipboardList },
   { href: '/exams', label: 'Lịch thi', icon: FileText },
   { href: '/settings', label: 'Cài đặt', icon: Settings },
-];
+] as const;
 
 interface SidebarProps {
   collapsed: boolean;
@@ -47,150 +48,276 @@ interface SidebarProps {
   onMobileClose: () => void;
 }
 
-export function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: SidebarProps) {
+export const Sidebar = memo(function Sidebar({
+  collapsed,
+  onToggle,
+  mobileOpen,
+  onMobileClose,
+}: SidebarProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
-  const { theme, setTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
 
-  const userInitial = session?.user?.name?.[0]?.toUpperCase() || session?.user?.email?.[0]?.toUpperCase() || 'U';
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const isDark = mounted && resolvedTheme === 'dark';
+  const userInitial =
+    session?.user?.name?.[0]?.toUpperCase() ||
+    session?.user?.email?.[0]?.toUpperCase() ||
+    'U';
+
+  const desktopCollapsed = collapsed && !mobileOpen;
 
   return (
     <>
-      {/* Mobile overlay */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
-          onClick={onMobileClose}
-        />
-      )}
+      {/* Mobile backdrop overlay */}
+      <div
+        aria-hidden="true"
+        onClick={onMobileClose}
+        className={cn(
+          'fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] transition-opacity duration-200 lg:hidden',
+          mobileOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        )}
+      />
 
       <aside
+        aria-label="Thanh điều hướng chính"
         className={cn(
-          'fixed top-0 left-0 z-40 h-screen bg-card border-r flex flex-col transition-[width,transform] duration-200 ease-in-out',
-          collapsed ? 'w-[70px]' : 'w-[250px]',
+          'fixed top-0 left-0 z-50 lg:z-40 h-screen bg-card border-r border-border/85 flex flex-col shadow-elevated lg:shadow-none transition-[width,transform] duration-200 ease-out',
+          'w-[272px] max-w-[85vw]',
+          collapsed ? 'lg:w-[72px]' : 'lg:w-[256px]',
           mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         )}
       >
-        {/* Logo */}
-        <div className="flex items-center h-16 px-4 border-b">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
-              <Calendar className="w-5 h-5 text-primary-foreground" />
+        {/* Brand header */}
+        <div
+          className={cn(
+            'flex items-center justify-between h-16 border-b border-border/80 px-4',
+            desktopCollapsed && 'lg:justify-center lg:px-2'
+          )}
+        >
+          <Link
+            href="/dashboard"
+            onClick={onMobileClose}
+            className="flex items-center gap-3 min-w-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <div className="w-9 h-9 rounded-xl bg-primary text-primary-foreground flex items-center justify-center flex-shrink-0 shadow-soft">
+              <Calendar className="w-5 h-5" />
             </div>
-            {!collapsed && (
-              <span className="text-lg font-bold whitespace-nowrap">WebSchedule</span>
+            {!desktopCollapsed && (
+              <div className="min-w-0">
+                <span className="block text-base font-bold tracking-tight text-foreground truncate">
+                  WebSchedule
+                </span>
+                <span className="block text-[11px] text-muted-foreground truncate">
+                  Quản lý học tập
+                </span>
+              </div>
             )}
-          </div>
+          </Link>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onMobileClose}
+            aria-label="Đóng menu điều hướng"
+            className="lg:hidden h-8 w-8 text-muted-foreground hover:text-foreground"
+          >
+            <X className="w-4 h-4" />
+          </Button>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
+        {/* Navigation links */}
+        <nav
+          aria-label="Danh mục trang"
+          className="flex-1 py-4 px-2.5 space-y-1 overflow-y-auto"
+        >
           {navItems.map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+            const isActive =
+              pathname === item.href || pathname.startsWith(item.href + '/');
             const Icon = item.icon;
 
-            const link = (
+            const linkElement = (
               <Link
                 key={item.href}
                 href={item.href}
                 prefetch={true}
                 onClick={onMobileClose}
+                aria-current={isActive ? 'page' : undefined}
+                aria-label={desktopCollapsed ? item.label : undefined}
                 className={cn(
-                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                  'group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150',
+                  desktopCollapsed && 'lg:justify-center lg:px-0',
                   isActive
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                    ? 'bg-primary/10 text-primary dark:bg-primary/15 dark:text-blue-400 font-semibold shadow-soft'
+                    : 'text-muted-foreground hover:bg-accent/80 hover:text-foreground'
                 )}
               >
-                <Icon className="w-5 h-5 flex-shrink-0" />
-                {!collapsed && <span>{item.label}</span>}
+                {isActive && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-primary"
+                  />
+                )}
+                <Icon
+                  className={cn(
+                    'w-[18px] h-[18px] flex-shrink-0 transition-transform duration-150 group-hover:scale-105 motion-reduce:group-hover:scale-100',
+                    isActive
+                      ? 'text-primary dark:text-blue-400'
+                      : 'text-muted-foreground group-hover:text-foreground'
+                  )}
+                />
+                {!desktopCollapsed && <span className="truncate">{item.label}</span>}
               </Link>
             );
 
-            if (collapsed) {
+            if (desktopCollapsed) {
               return (
                 <Tooltip key={item.href}>
-                  <TooltipTrigger asChild>{link}</TooltipTrigger>
-                  <TooltipContent side="right">{item.label}</TooltipContent>
+                  <TooltipTrigger asChild>{linkElement}</TooltipTrigger>
+                  <TooltipContent side="right" className="font-medium">
+                    {item.label}
+                  </TooltipContent>
                 </Tooltip>
               );
             }
 
-            return link;
+            return linkElement;
           })}
         </nav>
 
         <Separator />
 
-        {/* Bottom section */}
-        <div className="p-2 space-y-1">
-          {/* Theme toggle */}
-          <button
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors w-full"
-          >
-            {theme === 'dark' ? (
-              <Sun className="w-5 h-5 flex-shrink-0" />
-            ) : (
-              <Moon className="w-5 h-5 flex-shrink-0" />
-            )}
-            {!collapsed && <span>{theme === 'dark' ? 'Chế độ sáng' : 'Chế độ tối'}</span>}
-          </button>
-
-          {/* User */}
-          <div className="flex items-center gap-3 px-3 py-2.5">
-            <Avatar className="w-8 h-8 flex-shrink-0">
-              <AvatarFallback className="text-xs">{userInitial}</AvatarFallback>
-            </Avatar>
-            {!collapsed && (
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">
-                  {session?.user?.name || 'Người dùng'}
-                </p>
-                <p className="text-xs text-muted-foreground truncate">
-                  {session?.user?.email}
-                </p>
-              </div>
-            )}
-            {!collapsed && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="flex-shrink-0"
-                onClick={() => signOut({ callbackUrl: '/login' })}
+        {/* Footer controls */}
+        <div className="p-2.5 space-y-1.5">
+          {/* Theme switch */}
+          {(() => {
+            const themeLabel = isDark ? 'Chế độ sáng' : 'Chế độ tối';
+            const themeBtn = (
+              <button
+                type="button"
+                onClick={() => setTheme(isDark ? 'light' : 'dark')}
+                aria-label={isDark ? 'Chuyển sang chế độ sáng' : 'Chuyển sang chế độ tối'}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-muted-foreground hover:bg-accent/80 hover:text-foreground transition-colors w-full',
+                  desktopCollapsed && 'lg:justify-center lg:px-0'
+                )}
               >
-                <LogOut className="w-4 h-4" />
-              </Button>
+                {isDark ? (
+                  <Sun className="w-[18px] h-[18px] flex-shrink-0 text-amber-500" />
+                ) : (
+                  <Moon className="w-[18px] h-[18px] flex-shrink-0" />
+                )}
+                {!desktopCollapsed && (
+                  <span className="truncate">{mounted ? themeLabel : 'Giao diện'}</span>
+                )}
+              </button>
+            );
+
+            if (desktopCollapsed) {
+              return (
+                <Tooltip>
+                  <TooltipTrigger asChild>{themeBtn}</TooltipTrigger>
+                  <TooltipContent side="right">{themeLabel}</TooltipContent>
+                </Tooltip>
+              );
+            }
+            return themeBtn;
+          })()}
+
+          {/* User summary */}
+          <div
+            className={cn(
+              'flex items-center gap-2.5 rounded-xl bg-muted/45 px-2.5 py-2 border border-border/50',
+              desktopCollapsed && 'lg:justify-center lg:px-1.5 lg:bg-transparent lg:border-transparent'
+            )}
+          >
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Avatar className="w-8 h-8 flex-shrink-0 ring-1 ring-border">
+                  <AvatarFallback className="text-xs font-semibold bg-primary/10 text-primary dark:text-blue-400">
+                    {userInitial}
+                  </AvatarFallback>
+                </Avatar>
+              </TooltipTrigger>
+              {desktopCollapsed && (
+                <TooltipContent side="right">
+                  <p className="font-medium">{session?.user?.name || 'Sinh viên'}</p>
+                  {session?.user?.email && (
+                    <p className="text-xs text-muted-foreground">{session.user.email}</p>
+                  )}
+                </TooltipContent>
+              )}
+            </Tooltip>
+
+            {!desktopCollapsed && (
+              <>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground truncate">
+                    {session?.user?.name || 'Sinh viên'}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    {session?.user?.email}
+                  </p>
+                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Đăng xuất"
+                      className="h-8 w-8 flex-shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => signOut({ callbackUrl: '/login' })}
+                    >
+                      <LogOut className="w-4 h-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Đăng xuất</TooltipContent>
+                </Tooltip>
+              </>
             )}
           </div>
         </div>
 
-        {/* Collapse toggle - desktop only */}
+        {/* Desktop collapse button */}
         <button
+          type="button"
           onClick={onToggle}
-          className="hidden lg:flex absolute -right-3 top-20 w-6 h-6 rounded-full border bg-background items-center justify-center shadow-sm hover:bg-accent"
+          aria-label={collapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng'}
+          aria-expanded={!collapsed}
+          className="hidden lg:flex absolute -right-3 top-20 w-6 h-6 rounded-full border border-border bg-card text-muted-foreground items-center justify-center shadow-card hover:bg-accent hover:text-foreground transition-colors"
         >
           {collapsed ? (
-            <ChevronRight className="w-3 h-3" />
+            <ChevronRight className="w-3.5 h-3.5" />
           ) : (
-            <ChevronLeft className="w-3 h-3" />
+            <ChevronLeft className="w-3.5 h-3.5" />
           )}
         </button>
       </aside>
     </>
   );
-}
+});
 
-export function MobileMenuButton({ onClick }: { onClick: () => void }) {
+export const MobileMenuButton = memo(function MobileMenuButton({
+  onClick,
+}: {
+  onClick: () => void;
+}) {
   return (
     <Button
+      type="button"
       variant="ghost"
       size="icon"
-      className="lg:hidden"
+      aria-label="Mở menu điều hướng"
+      className="lg:hidden h-9 w-9 flex-shrink-0"
       onClick={onClick}
     >
       <Menu className="w-5 h-5" />
     </Button>
   );
-}
-
+});

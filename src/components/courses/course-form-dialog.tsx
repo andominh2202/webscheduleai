@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
   AlertTriangle,
+  BookOpen,
   CalendarPlus,
   Check,
   Loader2,
@@ -76,6 +77,11 @@ export interface CourseItem {
   notes?: string | null;
   credits?: number | null;
   semesterId: string;
+  semester?: {
+    id: string;
+    name: string;
+    isActive: boolean;
+  };
   hasMajorAssignment?: boolean;
   majorAssignmentNote?: string | null;
   examFormat?: string | null;
@@ -86,8 +92,11 @@ export interface CourseItem {
     schedules?: number;
     sessions?: number;
     assignments?: number;
+    exams?: number;
   };
 }
+
+const GRADING_PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
 
 const scheduleEntrySchema = z
   .object({
@@ -96,11 +105,17 @@ const scheduleEntrySchema = z
     startTime: z.string().min(1, 'Nhập giờ bắt đầu'),
     endTime: z.string().min(1, 'Nhập giờ kết thúc'),
     startPeriod: z.preprocess(
-      (v) => (v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? undefined : Number(v)),
+      (v) =>
+        v === '' || v === null || v === undefined || Number.isNaN(Number(v))
+          ? undefined
+          : Number(v),
       z.number().int().min(1, 'Tiết phải >= 1').optional()
     ),
     numPeriods: z.preprocess(
-      (v) => (v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? undefined : Number(v)),
+      (v) =>
+        v === '' || v === null || v === undefined || Number.isNaN(Number(v))
+          ? undefined
+          : Number(v),
       z.number().int().min(1, 'Số tiết phải >= 1').optional()
     ),
     room: z.string().optional(),
@@ -125,7 +140,10 @@ const courseFormSchema = z.object({
   color: z.string().default('#3b82f6'),
   notes: z.string().optional(),
   credits: z.preprocess(
-    (v) => (v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? undefined : Number(v)),
+    (v) =>
+      v === '' || v === null || v === undefined || Number.isNaN(Number(v))
+        ? undefined
+        : Number(v),
     z.number().int().min(0, 'Số tín chỉ không hợp lệ').optional()
   ),
   semesterId: z.string().min(1, 'Vui lòng chọn học kỳ'),
@@ -138,11 +156,18 @@ const courseFormSchema = z.object({
 
 type CourseFormValues = z.infer<typeof courseFormSchema>;
 
+function formatLocalYmd(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function toDateInputValue(dateStr?: string | null): string {
-  if (!dateStr) return new Date().toISOString().slice(0, 10);
+  if (!dateStr) return formatLocalYmd(new Date());
   const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
-  return d.toISOString().slice(0, 10);
+  if (Number.isNaN(d.getTime())) return formatLocalYmd(new Date());
+  return formatLocalYmd(d);
 }
 
 function toMinutes(t: string): number {
@@ -154,6 +179,12 @@ function toMinutes(t: string): number {
 function timeOverlaps(s1: string, e1: string, s2: string, e2: string): boolean {
   return toMinutes(s1) < toMinutes(e2) && toMinutes(s2) < toMinutes(e1);
 }
+
+const DEFAULT_GRADING: GradingComponent[] = [
+  { label: 'Chuyên cần', weight: 10 },
+  { label: 'Giữa kỳ', weight: 30 },
+  { label: 'Cuối kỳ', weight: 60 },
+];
 
 export interface CourseFormDialogProps {
   open: boolean;
@@ -178,11 +209,7 @@ export function CourseFormDialog({
   const [conflictWarnings, setConflictWarnings] = React.useState<string[]>([]);
   const initialScheduleIdsRef = React.useRef<string[]>([]);
   const savedCourseIdRef = React.useRef<string | null>(null);
-  const [gradingItems, setGradingItems] = React.useState<GradingComponent[]>([
-    { label: 'Chuyên cần', weight: 10 },
-    { label: 'Giữa kỳ', weight: 30 },
-    { label: 'Cuối kỳ', weight: 60 },
-  ]);
+  const [gradingItems, setGradingItems] = React.useState<GradingComponent[]>(DEFAULT_GRADING);
 
   const activeSemester = React.useMemo(
     () => semesters.find((s) => s.isActive) || semesters[0],
@@ -233,7 +260,11 @@ export function CourseFormDialog({
     [semesters, watchedSemesterId, activeSemester]
   );
 
-  // Initialize form when dialog opens
+  const totalGradingWeight = React.useMemo(
+    () => gradingItems.reduce((acc, g) => acc + (Number(g.weight) || 0), 0),
+    [gradingItems]
+  );
+
   React.useEffect(() => {
     if (!open) return;
     setConflictWarnings([]);
@@ -275,18 +306,10 @@ export function CourseFormDialog({
         examNotes: course.examNotes || '',
         schedules: mappedSchedules,
       });
-      const parsedGrades = parseGradingBreakdown(course.gradingBreakdown);
-      setGradingItems(
-        parsedGrades.length > 0
-          ? parsedGrades
-          : [
-              { label: 'Chuyên cần', weight: 10 },
-              { label: 'Giữa kỳ', weight: 30 },
-              { label: 'Cuối kỳ', weight: 60 },
-            ]
-      );
 
-      // Fetch full course detail to ensure schedules are up-to-date
+      const parsedGrades = parseGradingBreakdown(course.gradingBreakdown);
+      setGradingItems(parsedGrades.length > 0 ? parsedGrades : DEFAULT_GRADING);
+
       if (!course.schedules) {
         setLoadingSchedules(true);
         fetch(`/api/courses/${course.id}`)
@@ -334,15 +357,10 @@ export function CourseFormDialog({
         examNotes: '',
         schedules: [],
       });
-      setGradingItems([
-        { label: 'Chuyên cần', weight: 10 },
-        { label: 'Giữa kỳ', weight: 30 },
-        { label: 'Cuối kỳ', weight: 60 },
-      ]);
+      setGradingItems(DEFAULT_GRADING);
     }
   }, [open, course, activeSemester, reset, replace]);
 
-  // Live conflict detection against other courses and between current schedule rows
   const liveConflicts = React.useMemo(() => {
     const warnings: string[] = [];
     const currentSchedules = watchedSchedules || [];
@@ -350,7 +368,6 @@ export function CourseFormDialog({
     currentSchedules.forEach((sched, idx) => {
       if (!sched.startTime || !sched.endTime || sched.startTime >= sched.endTime) return;
 
-      // Check internal duplicate/overlap
       for (let j = idx + 1; j < currentSchedules.length; j++) {
         const other = currentSchedules[j];
         if (
@@ -363,9 +380,9 @@ export function CourseFormDialog({
         }
       }
 
-      // Check against existing courses' schedules
       existingCourses.forEach((otherCourse) => {
         if (course && otherCourse.id === course.id) return;
+        if (watchedSemesterId && otherCourse.semesterId !== watchedSemesterId) return;
         (otherCourse.schedules || []).forEach((otherSched) => {
           if (
             Number(sched.dayOfWeek) === Number(otherSched.dayOfWeek) &&
@@ -380,15 +397,15 @@ export function CourseFormDialog({
     });
 
     return warnings;
-  }, [watchedSchedules, existingCourses, course]);
+  }, [watchedSchedules, existingCourses, course, watchedSemesterId]);
 
   const handleAddScheduleRow = () => {
     const defaultStart = selectedSemester?.startDate
       ? toDateInputValue(selectedSemester.startDate)
-      : new Date().toISOString().slice(0, 10);
+      : formatLocalYmd(new Date());
     const defaultEnd = selectedSemester?.endDate
       ? toDateInputValue(selectedSemester.endDate)
-      : new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      : formatLocalYmd(new Date(Date.now() + 120 * 24 * 60 * 60 * 1000));
 
     append({
       dayOfWeek: 1,
@@ -446,23 +463,19 @@ export function CourseFormDialog({
       savedCourseIdRef.current = savedCourseId;
       const serverConflicts: string[] = [];
 
-      // Delete removed schedules when editing or re-submitting
       if (shouldUpdateCourse) {
         const currentIds = new Set(
           values.schedules.map((s) => s.id).filter((id): id is string => Boolean(id))
         );
         const removedIds = initialScheduleIdsRef.current.filter((id) => !currentIds.has(id));
         await Promise.all(
-          removedIds.map((schedId) =>
-            fetch(`/api/schedules/${schedId}`, { method: 'DELETE' })
-          )
+          removedIds.map((schedId) => fetch(`/api/schedules/${schedId}`, { method: 'DELETE' }))
         );
         initialScheduleIdsRef.current = initialScheduleIdsRef.current.filter((id) =>
           currentIds.has(id)
         );
       }
 
-      // Create or update schedules
       for (let i = 0; i < values.schedules.length; i++) {
         const s = values.schedules[i];
         const schedPayload = {
@@ -536,17 +549,20 @@ export function CourseFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[calc(100vw-1.5rem)] max-w-2xl max-h-[90dvh] overflow-y-auto p-5 sm:p-6">
         <DialogHeader>
-          <DialogTitle>{isEdit ? 'Chỉnh sửa môn học' : 'Thêm môn học mới'}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <BookOpen className="h-5 w-5 text-primary shrink-0" />
+            {isEdit ? 'Chỉnh sửa môn học' : 'Thêm môn học mới'}
+          </DialogTitle>
           <DialogDescription>
-            Nhập thông tin học phần và thiết lập các buổi học lặp lại hàng tuần.
+            Nhập thông tin học phần, cơ cấu đánh giá và thiết lập các buổi học lặp lại hàng tuần.
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5 pt-1" noValidate>
           {/* Basic Course Info */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="course-name">
                 Tên môn học <span className="text-destructive">*</span>
@@ -554,10 +570,14 @@ export function CourseFormDialog({
               <Input
                 id="course-name"
                 placeholder="VD: Cấu trúc dữ liệu & Giải thuật"
+                aria-invalid={Boolean(errors.name)}
+                aria-describedby={errors.name ? 'course-name-error' : undefined}
                 {...register('name')}
               />
               {errors.name && (
-                <p className="text-xs text-destructive">{errors.name.message}</p>
+                <p id="course-name-error" role="alert" className="text-xs text-destructive">
+                  {errors.name.message}
+                </p>
               )}
             </div>
 
@@ -568,10 +588,14 @@ export function CourseFormDialog({
               <Input
                 id="course-code"
                 placeholder="VD: IT3011"
+                aria-invalid={Boolean(errors.courseCode)}
+                aria-describedby={errors.courseCode ? 'course-code-error' : undefined}
                 {...register('courseCode')}
               />
               {errors.courseCode && (
-                <p className="text-xs text-destructive">{errors.courseCode.message}</p>
+                <p id="course-code-error" role="alert" className="text-xs text-destructive">
+                  {errors.courseCode.message}
+                </p>
               )}
             </div>
 
@@ -584,7 +608,11 @@ export function CourseFormDialog({
                 name="semesterId"
                 render={({ field }) => (
                   <Select value={field.value} onValueChange={field.onChange}>
-                    <SelectTrigger id="course-semester">
+                    <SelectTrigger
+                      id="course-semester"
+                      aria-invalid={Boolean(errors.semesterId)}
+                      aria-describedby={errors.semesterId ? 'course-semester-error' : undefined}
+                    >
                       <SelectValue placeholder="Chọn học kỳ" />
                     </SelectTrigger>
                     <SelectContent>
@@ -604,7 +632,9 @@ export function CourseFormDialog({
                 )}
               />
               {errors.semesterId && (
-                <p className="text-xs text-destructive">{errors.semesterId.message}</p>
+                <p id="course-semester-error" role="alert" className="text-xs text-destructive">
+                  {errors.semesterId.message}
+                </p>
               )}
             </div>
 
@@ -624,30 +654,40 @@ export function CourseFormDialog({
                 type="number"
                 min={0}
                 placeholder="VD: 3"
+                aria-invalid={Boolean(errors.credits)}
+                aria-describedby={errors.credits ? 'course-credits-error' : undefined}
                 {...register('credits')}
               />
               {errors.credits && (
-                <p className="text-xs text-destructive">{errors.credits.message}</p>
+                <p id="course-credits-error" role="alert" className="text-xs text-destructive">
+                  {errors.credits.message}
+                </p>
               )}
             </div>
 
             {/* Color Picker */}
             <div className="space-y-2 sm:col-span-2">
-              <Label>Màu nhận diện</Label>
-              <div className="flex flex-wrap gap-2">
+              <Label id="course-color-label">Màu nhận diện trên lịch</Label>
+              <div
+                role="radiogroup"
+                aria-labelledby="course-color-label"
+                className="flex flex-wrap gap-2.5"
+              >
                 {COURSE_COLORS.map((c) => {
                   const selected = watchedColor === c;
                   return (
                     <button
                       key={c}
                       type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      aria-label={`Chọn màu ${c}`}
                       onClick={() => setValue('color', c, { shouldDirty: true })}
                       className={cn(
-                        'h-8 w-8 rounded-full flex items-center justify-center transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+                        'h-8 w-8 rounded-full flex items-center justify-center transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
                         selected && 'ring-2 ring-foreground ring-offset-2 scale-110'
                       )}
                       style={{ backgroundColor: c }}
-                      title={c}
                     >
                       {selected && <Check className="h-4 w-4 text-white drop-shadow" />}
                     </button>
@@ -661,7 +701,7 @@ export function CourseFormDialog({
               <Textarea
                 id="course-notes"
                 placeholder="Thông tin chung, email giảng viên, tài liệu giáo trình..."
-                className="min-h-[65px]"
+                className="min-h-[64px] resize-y"
                 {...register('notes')}
               />
             </div>
@@ -670,18 +710,18 @@ export function CourseFormDialog({
           <Separator />
 
           {/* Exam, Major Assignment & Grading Breakdown Section */}
-          <div className="space-y-4">
+          <div className="space-y-3.5">
             <div>
-              <h4 className="text-sm font-semibold">Thi cử, Bài tập lớn & Cơ cấu chia điểm</h4>
+              <h4 className="text-sm font-semibold">Thi cử, Bài tập lớn & Cơ cấu điểm</h4>
               <p className="text-xs text-muted-foreground">
-                Ghi rõ môn này thi như nào, có làm bài tập lớn không và cách tính điểm môn.
+                Ghi rõ hình thức thi, bài tập lớn và tỷ trọng điểm thành phần của môn học.
               </p>
             </div>
 
-            <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+            <div className="rounded-xl border bg-muted/25 p-3.5 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="space-y-0.5">
-                  <Label htmlFor="has-major-assignment" className="text-sm font-medium">
+                  <Label htmlFor="has-major-assignment" className="text-sm font-medium cursor-pointer">
                     Có cần làm Bài tập lớn / Đồ án không?
                   </Label>
                   <p className="text-xs text-muted-foreground">
@@ -702,9 +742,12 @@ export function CourseFormDialog({
               </div>
 
               {watchedHasMajor && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Chi tiết bài tập lớn / đồ án</Label>
+                <div className="space-y-1.5 pt-1 border-t">
+                  <Label htmlFor="course-major-note" className="text-xs">
+                    Chi tiết bài tập lớn / đồ án
+                  </Label>
                   <Input
+                    id="course-major-note"
                     placeholder="VD: Làm nhóm 3 người, nộp báo cáo và demo tuần 14"
                     className="h-9 text-xs"
                     {...register('majorAssignmentNote')}
@@ -713,18 +756,17 @@ export function CourseFormDialog({
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="space-y-1.5">
-                <Label className="text-xs">Hình thức thi cuối kỳ</Label>
+                <Label htmlFor="course-exam-format" className="text-xs">
+                  Hình thức thi cuối kỳ
+                </Label>
                 <Controller
                   control={control}
                   name="examFormat"
                   render={({ field }) => (
-                    <Select
-                      value={field.value || ''}
-                      onValueChange={field.onChange}
-                    >
-                      <SelectTrigger className="h-9 text-xs">
+                    <Select value={field.value || ''} onValueChange={field.onChange}>
+                      <SelectTrigger id="course-exam-format" className="h-9 text-xs">
                         <SelectValue placeholder="Chọn hình thức thi" />
                       </SelectTrigger>
                       <SelectContent>
@@ -740,9 +782,12 @@ export function CourseFormDialog({
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs">Thi như thế nào / Quy định thi</Label>
+                <Label htmlFor="course-exam-notes" className="text-xs">
+                  Quy định & Lưu ý khi thi
+                </Label>
                 <Input
-                  placeholder="VD: 90 phút, được dùng 1 tờ A4 viết tay, cấm tài liệu"
+                  id="course-exam-notes"
+                  placeholder="VD: 90 phút, được dùng 1 tờ A4 viết tay"
                   className="h-9 text-xs"
                   {...register('examNotes')}
                 />
@@ -750,21 +795,21 @@ export function CourseFormDialog({
             </div>
 
             {/* Grading Breakdown */}
-            <div className="space-y-2.5 rounded-lg border p-3 bg-muted/20">
+            <div className="space-y-2.5 rounded-xl border p-3.5 bg-muted/25">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <Label className="text-xs font-semibold">Chia điểm ra sao (%)</Label>
-                  {(() => {
-                    const total = gradingItems.reduce((acc, g) => acc + (Number(g.weight) || 0), 0);
-                    return (
-                      <Badge
-                        variant={total === 100 ? 'default' : 'secondary'}
-                        className="text-[10px]"
-                      >
-                        Tổng: {total}%
-                      </Badge>
-                    );
-                  })()}
+                  <span className="text-xs font-semibold">Cơ cấu điểm (%)</span>
+                  <Badge
+                    variant={totalGradingWeight === 100 ? 'default' : 'secondary'}
+                    className={cn(
+                      'text-[10px]',
+                      totalGradingWeight !== 100 &&
+                        totalGradingWeight > 0 &&
+                        'bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
+                    )}
+                  >
+                    Tổng: {totalGradingWeight}%
+                  </Badge>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
                   <Button
@@ -807,16 +852,38 @@ export function CourseFormDialog({
                     }
                   >
                     <Plus className="h-3 w-3" />
-                    Thêm đầu điểm
+                    Thêm cột điểm
                   </Button>
                 </div>
               </div>
 
+              {gradingItems.length > 0 && totalGradingWeight > 0 && (
+                <div className="h-2 w-full rounded-full overflow-hidden flex bg-muted">
+                  {gradingItems.map((g, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        width: `${Math.max(0, Math.min(100, g.weight))}%`,
+                        backgroundColor: GRADING_PALETTE[i % GRADING_PALETTE.length],
+                      }}
+                      title={`${g.label || 'Đầu điểm'}: ${g.weight}%`}
+                    />
+                  ))}
+                </div>
+              )}
+
               <div className="space-y-2">
                 {gradingItems.map((g, idx) => (
                   <div key={idx} className="flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full shrink-0"
+                      style={{
+                        backgroundColor: GRADING_PALETTE[idx % GRADING_PALETTE.length],
+                      }}
+                    />
                     <Input
                       value={g.label}
+                      aria-label={`Tên đầu điểm ${idx + 1}`}
                       onChange={(e) => {
                         const val = e.target.value;
                         setGradingItems((prev) =>
@@ -826,19 +893,20 @@ export function CourseFormDialog({
                       placeholder="VD: Chuyên cần, BTL, Giữa kỳ..."
                       className="h-8 text-xs flex-1"
                     />
-                    <div className="flex items-center gap-1 w-24">
+                    <div className="flex items-center gap-1 w-24 shrink-0">
                       <Input
                         type="number"
                         min={0}
                         max={100}
                         value={g.weight}
+                        aria-label={`Trọng số phần trăm đầu điểm ${idx + 1}`}
                         onChange={(e) => {
                           const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
                           setGradingItems((prev) =>
                             prev.map((item, i) => (i === idx ? { ...item, weight: val } : item))
                           );
                         }}
-                        className="h-8 text-xs text-right"
+                        className="h-8 text-xs text-right tabular-nums"
                       />
                       <span className="text-xs text-muted-foreground">%</span>
                     </div>
@@ -846,7 +914,8 @@ export function CourseFormDialog({
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8 text-destructive shrink-0"
+                      className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0"
+                      aria-label={`Xóa đầu điểm ${g.label || idx + 1}`}
                       onClick={() =>
                         setGradingItems((prev) => prev.filter((_, i) => i !== idx))
                       }
@@ -863,14 +932,14 @@ export function CourseFormDialog({
 
           {/* Schedules Section */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h4 className="text-sm font-semibold flex items-center gap-1.5">
                   <CalendarPlus className="h-4 w-4 text-primary" />
-                  Lịch học hàng tuần
+                  Lịch học hàng tuần ({fields.length})
                 </h4>
                 <p className="text-xs text-muted-foreground">
-                  Hệ thống tự động tạo các buổi học dựa trên lịch lặp lại này.
+                  Hệ thống tự động sinh các buổi học dựa trên lịch lặp lại này.
                 </p>
               </div>
               <Button
@@ -885,9 +954,11 @@ export function CourseFormDialog({
               </Button>
             </div>
 
-            {/* Conflict warnings */}
             {(liveConflicts.length > 0 || conflictWarnings.length > 0) && (
-              <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 p-3 space-y-1">
+              <div
+                role="alert"
+                className="rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 p-3 space-y-1"
+              >
                 <div className="flex items-center gap-1.5 text-sm font-semibold text-amber-800 dark:text-amber-300">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
                   Cảnh báo trùng lịch học
@@ -909,22 +980,23 @@ export function CourseFormDialog({
                 Đang tải lịch học...
               </div>
             ) : fields.length === 0 ? (
-              <div className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">
+              <div className="rounded-xl border border-dashed p-5 text-center text-xs text-muted-foreground">
                 Chưa có lịch học nào. Nhấn &ldquo;Thêm buổi học&rdquo; để thiết lập thời khóa biểu.
               </div>
             ) : (
               <div className="space-y-3">
                 {fields.map((fieldItem, index) => {
                   const rowErr = errors.schedules?.[index];
+                  const prefix = `sched-${index}`;
                   return (
                     <div
                       key={fieldItem.fieldKey}
-                      className="rounded-lg border bg-muted/30 p-3 space-y-3"
+                      className="rounded-xl border bg-muted/25 p-3.5 space-y-3"
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-muted-foreground">
-                          Lịch học #{index + 1}
-                        </span>
+                        <Badge variant="outline" className="text-xs font-medium">
+                          Buổi học #{index + 1}
+                        </Badge>
                         <Button
                           type="button"
                           variant="ghost"
@@ -939,7 +1011,9 @@ export function CourseFormDialog({
 
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                         <div className="space-y-1 col-span-2 sm:col-span-1">
-                          <Label className="text-xs">Thứ</Label>
+                          <Label htmlFor={`${prefix}-day`} className="text-xs">
+                            Thứ trong tuần
+                          </Label>
                           <Controller
                             control={control}
                             name={`schedules.${index}.dayOfWeek`}
@@ -948,7 +1022,7 @@ export function CourseFormDialog({
                                 value={String(field.value)}
                                 onValueChange={(v) => field.onChange(Number(v))}
                               >
-                                <SelectTrigger className="h-9 text-xs">
+                                <SelectTrigger id={`${prefix}-day`} className="h-9 text-xs">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -964,41 +1038,51 @@ export function CourseFormDialog({
                         </div>
 
                         <div className="space-y-1">
-                          <Label className="text-xs">Giờ bắt đầu</Label>
+                          <Label htmlFor={`${prefix}-start`} className="text-xs">
+                            Giờ bắt đầu
+                          </Label>
                           <Input
+                            id={`${prefix}-start`}
                             type="time"
                             className="h-9 text-xs"
+                            aria-invalid={Boolean(rowErr?.startTime)}
                             {...register(`schedules.${index}.startTime`)}
                           />
                           {rowErr?.startTime && (
-                            <p className="text-[11px] text-destructive">
+                            <p role="alert" className="text-[11px] text-destructive">
                               {rowErr.startTime.message}
                             </p>
                           )}
                         </div>
 
                         <div className="space-y-1">
-                          <Label className="text-xs">Giờ kết thúc</Label>
+                          <Label htmlFor={`${prefix}-end`} className="text-xs">
+                            Giờ kết thúc
+                          </Label>
                           <Input
+                            id={`${prefix}-end`}
                             type="time"
                             className="h-9 text-xs"
+                            aria-invalid={Boolean(rowErr?.endTime)}
                             {...register(`schedules.${index}.endTime`)}
                           />
                           {rowErr?.endTime && (
-                            <p className="text-[11px] text-destructive">
+                            <p role="alert" className="text-[11px] text-destructive">
                               {rowErr.endTime.message}
                             </p>
                           )}
                         </div>
 
                         <div className="space-y-1 col-span-2 sm:col-span-1">
-                          <Label className="text-xs">Loại tuần</Label>
+                          <Label htmlFor={`${prefix}-week`} className="text-xs">
+                            Loại tuần
+                          </Label>
                           <Controller
                             control={control}
                             name={`schedules.${index}.weekType`}
                             render={({ field }) => (
                               <Select value={field.value} onValueChange={field.onChange}>
-                                <SelectTrigger className="h-9 text-xs">
+                                <SelectTrigger id={`${prefix}-week`} className="h-9 text-xs">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -1012,8 +1096,11 @@ export function CourseFormDialog({
                         </div>
 
                         <div className="space-y-1">
-                          <Label className="text-xs">Phòng học</Label>
+                          <Label htmlFor={`${prefix}-room`} className="text-xs">
+                            Phòng học
+                          </Label>
                           <Input
+                            id={`${prefix}-room`}
                             placeholder="VD: B1-203"
                             className="h-9 text-xs"
                             {...register(`schedules.${index}.room`)}
@@ -1021,8 +1108,11 @@ export function CourseFormDialog({
                         </div>
 
                         <div className="space-y-1">
-                          <Label className="text-xs">Cơ sở / Địa điểm</Label>
+                          <Label htmlFor={`${prefix}-loc`} className="text-xs">
+                            Cơ sở / Địa điểm
+                          </Label>
                           <Input
+                            id={`${prefix}-loc`}
                             placeholder="VD: Cơ sở 1"
                             className="h-9 text-xs"
                             {...register(`schedules.${index}.location`)}
@@ -1030,8 +1120,11 @@ export function CourseFormDialog({
                         </div>
 
                         <div className="space-y-1">
-                          <Label className="text-xs">Tiết bắt đầu</Label>
+                          <Label htmlFor={`${prefix}-period`} className="text-xs">
+                            Tiết bắt đầu
+                          </Label>
                           <Input
+                            id={`${prefix}-period`}
                             type="number"
                             min={1}
                             placeholder="1"
@@ -1041,8 +1134,11 @@ export function CourseFormDialog({
                         </div>
 
                         <div className="space-y-1">
-                          <Label className="text-xs">Số tiết</Label>
+                          <Label htmlFor={`${prefix}-numperiods`} className="text-xs">
+                            Số tiết
+                          </Label>
                           <Input
+                            id={`${prefix}-numperiods`}
                             type="number"
                             min={1}
                             placeholder="2"
@@ -1052,28 +1148,36 @@ export function CourseFormDialog({
                         </div>
 
                         <div className="space-y-1 col-span-1 sm:col-span-2">
-                          <Label className="text-xs">Từ ngày</Label>
+                          <Label htmlFor={`${prefix}-from`} className="text-xs">
+                            Từ ngày
+                          </Label>
                           <Input
+                            id={`${prefix}-from`}
                             type="date"
                             className="h-9 text-xs"
+                            aria-invalid={Boolean(rowErr?.startDate)}
                             {...register(`schedules.${index}.startDate`)}
                           />
                           {rowErr?.startDate && (
-                            <p className="text-[11px] text-destructive">
+                            <p role="alert" className="text-[11px] text-destructive">
                               {rowErr.startDate.message}
                             </p>
                           )}
                         </div>
 
                         <div className="space-y-1 col-span-1 sm:col-span-2">
-                          <Label className="text-xs">Đến ngày</Label>
+                          <Label htmlFor={`${prefix}-to`} className="text-xs">
+                            Đến ngày
+                          </Label>
                           <Input
+                            id={`${prefix}-to`}
                             type="date"
                             className="h-9 text-xs"
+                            aria-invalid={Boolean(rowErr?.endDate)}
                             {...register(`schedules.${index}.endDate`)}
                           />
                           {rowErr?.endDate && (
-                            <p className="text-[11px] text-destructive">
+                            <p role="alert" className="text-[11px] text-destructive">
                               {rowErr.endDate.message}
                             </p>
                           )}
@@ -1086,16 +1190,21 @@ export function CourseFormDialog({
             )}
           </div>
 
-          <DialogFooter className="gap-2 pt-2">
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2 pt-2">
             <Button
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
               disabled={submitting}
+              className="w-full sm:w-auto"
             >
               Hủy
             </Button>
-            <Button type="submit" disabled={submitting || semesters.length === 0}>
+            <Button
+              type="submit"
+              disabled={submitting || semesters.length === 0}
+              className="w-full sm:w-auto"
+            >
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {isEdit ? 'Lưu thay đổi' : 'Tạo môn học'}
             </Button>

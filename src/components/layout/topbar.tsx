@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import { useTheme } from 'next-themes';
@@ -10,6 +10,8 @@ import {
   Calendar,
   ClipboardList,
   FileText,
+  LayoutDashboard,
+  Loader2,
   LogOut,
   Moon,
   Plus,
@@ -17,6 +19,7 @@ import {
   Settings,
   StickyNote,
   Sun,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -55,7 +58,12 @@ interface Semester {
 
 interface SearchResults {
   courses: { id: string; name: string; courseCode: string; color: string }[];
-  notes: { id: string; date: string; content?: string | null; course: { name: string; color: string } }[];
+  notes: {
+    id: string;
+    date: string;
+    content?: string | null;
+    course: { name: string; color: string };
+  }[];
   assignments: { id: string; title: string; dueDate: string; course: { name: string } }[];
   exams: { id: string; title: string; date: string; course: { name: string } }[];
 }
@@ -75,10 +83,10 @@ interface TopbarProps {
   onMobileMenuClick: () => void;
 }
 
-export function Topbar({ onMobileMenuClick }: TopbarProps) {
+export const Topbar = memo(function Topbar({ onMobileMenuClick }: TopbarProps) {
   const router = useRouter();
   const { data: session } = useSession();
-  const { theme, setTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
   const cachedSemesters = getCached<Semester[]>('/api/semesters');
@@ -94,10 +102,16 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResults | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const mobileSearchInputRef = useRef<HTMLInputElement | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortSearchRef = useRef<AbortController | null>(null);
 
   // Notifications state
+  const [notifyOpen, setNotifyOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [urgentCount, setUrgentCount] = useState(0);
   const [browserNotifyEnabled, setBrowserNotifyEnabled] = useState(false);
@@ -111,6 +125,27 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setBrowserNotifyEnabled(Notification.permission === 'granted');
     }
+  }, []);
+
+  // Keyboard shortcut Ctrl+K / Cmd+K for quick search, Escape to dismiss
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (window.innerWidth < 640) {
+          setMobileSearchOpen(true);
+          setTimeout(() => mobileSearchInputRef.current?.focus(), 20);
+        } else {
+          searchInputRef.current?.focus();
+        }
+      } else if (e.key === 'Escape') {
+        setSearchOpen(false);
+        setMobileSearchOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   const fetchSemesters = useCallback(async () => {
@@ -153,7 +188,6 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
         setNotifications(list);
         setUrgentCount(Number(data.urgentCount ?? 0));
 
-        // Nhắc lịch trước giờ học 15-30 phút nếu người dùng đã bật Notification
         if (
           typeof window !== 'undefined' &&
           'Notification' in window &&
@@ -200,31 +234,46 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
     };
   }, [fetchSemesters, fetchNotifications]);
 
-  // Global search debounce
+  // Global search debounce with AbortController cleanup
   useEffect(() => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    abortSearchRef.current?.abort();
+
     const q = searchQuery.trim();
     if (!q) {
+      setIsSearching(false);
       setSearchResults(null);
       setSearchOpen(false);
       return;
     }
 
+    setIsSearching(true);
     searchTimerRef.current = setTimeout(async () => {
+      const controller = new AbortController();
+      abortSearchRef.current = controller;
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, {
+          signal: controller.signal,
+        });
         if (res.ok) {
           const data: SearchResults = await res.json();
           setSearchResults(data);
           setSearchOpen(true);
         }
-      } catch {
-        // ignore
+      } catch (e: unknown) {
+        if ((e as Error)?.name !== 'AbortError') {
+          // ignore
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearching(false);
+        }
       }
-    }, 300);
+    }, 280);
 
     return () => {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      abortSearchRef.current?.abort();
     };
   }, [searchQuery]);
 
@@ -246,8 +295,21 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
     e.preventDefault();
     if (searchQuery.trim()) {
       setSearchOpen(false);
+      setMobileSearchOpen(false);
       router.push(`/notes?search=${encodeURIComponent(searchQuery.trim())}`);
     }
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    setSearchResults(null);
+    setSearchOpen(false);
+  };
+
+  const handleNavigateFromSearch = (href: string) => {
+    setSearchOpen(false);
+    setMobileSearchOpen(false);
+    router.push(href);
   };
 
   const handleRequestBrowserNotify = async () => {
@@ -271,154 +333,252 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
       searchResults.exams.length
     : 0;
 
+  const isDark = mounted && resolvedTheme === 'dark';
+
   const userInitial =
     session?.user?.name?.[0]?.toUpperCase() ||
     session?.user?.email?.[0]?.toUpperCase() ||
     'U';
 
+  const renderSearchDropdown = () => {
+    if (!searchOpen || !searchResults) return null;
+
+    return (
+      <>
+        <div
+          aria-hidden="true"
+          className="fixed inset-0 z-40"
+          onClick={() => setSearchOpen(false)}
+        />
+        <div
+          role="listbox"
+          aria-label="Kết quả tìm kiếm nhanh"
+          className="absolute left-0 right-0 top-11 z-50 rounded-xl border border-border bg-popover text-popover-foreground shadow-elevated max-h-[72vh] overflow-y-auto p-2 space-y-2.5 animate-scale-in"
+        >
+          {totalSearchHits === 0 ? (
+            <div className="py-6 px-3 text-center space-y-1">
+              <p className="text-xs font-medium text-foreground">
+                Không tìm thấy kết quả cho &ldquo;{searchQuery}&rdquo;
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Thử tìm theo tên môn học, mã môn, tiêu đề bài tập hoặc nội dung ghi chú.
+              </p>
+            </div>
+          ) : (
+            <>
+              {searchResults.courses.length > 0 && (
+                <div className="space-y-1">
+                  <p className="px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Môn học
+                  </p>
+                  {searchResults.courses.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => handleNavigateFromSearch('/courses')}
+                      className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-accent transition-colors text-left"
+                    >
+                      <BookOpen className="w-4 h-4 shrink-0" style={{ color: c.color }} />
+                      <span className="truncate font-medium text-foreground">{c.name}</span>
+                      {c.courseCode && (
+                        <span className="text-xs text-muted-foreground ml-auto shrink-0">
+                          {c.courseCode}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {searchResults.notes.length > 0 && (
+                <div className="space-y-1">
+                  <p className="px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Ghi chú buổi học
+                  </p>
+                  {searchResults.notes.map((n) => (
+                    <button
+                      key={n.id}
+                      type="button"
+                      onClick={() =>
+                        handleNavigateFromSearch(
+                          `/notes?search=${encodeURIComponent(searchQuery.trim())}`
+                        )
+                      }
+                      className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-accent transition-colors text-left"
+                    >
+                      <StickyNote className="w-4 h-4 shrink-0 text-amber-500" />
+                      <span className="truncate text-foreground">{n.course.name}</span>
+                      <span className="text-xs text-muted-foreground ml-auto shrink-0 tabular-nums">
+                        {formatShortDate(n.date)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {searchResults.assignments.length > 0 && (
+                <div className="space-y-1">
+                  <p className="px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Bài tập
+                  </p>
+                  {searchResults.assignments.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => handleNavigateFromSearch('/assignments')}
+                      className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-accent transition-colors text-left"
+                    >
+                      <ClipboardList className="w-4 h-4 shrink-0 text-primary" />
+                      <span className="truncate text-foreground">{a.title}</span>
+                      <span className="text-xs text-muted-foreground ml-auto shrink-0 tabular-nums">
+                        {formatShortDate(a.dueDate)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {searchResults.exams.length > 0 && (
+                <div className="space-y-1">
+                  <p className="px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Lịch thi
+                  </p>
+                  {searchResults.exams.map((ex) => (
+                    <button
+                      key={ex.id}
+                      type="button"
+                      onClick={() => handleNavigateFromSearch('/exams')}
+                      className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-accent transition-colors text-left"
+                    >
+                      <FileText className="w-4 h-4 shrink-0 text-rose-500" />
+                      <span className="truncate text-foreground">{ex.title}</span>
+                      <span className="text-xs text-muted-foreground ml-auto shrink-0 tabular-nums">
+                        {formatShortDate(ex.date)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </>
+    );
+  };
+
   return (
-    <header className="h-16 border-b bg-card/80 backdrop-blur-sm flex items-center justify-between px-4 gap-3 sticky top-0 z-30">
+    <header className="h-16 border-b border-border/80 bg-card/85 backdrop-blur-md flex items-center justify-between px-3 sm:px-5 gap-2.5 sticky top-0 z-30">
+      {/* Mobile expanded search bar */}
+      {mobileSearchOpen && (
+        <div className="absolute inset-x-0 top-0 h-16 bg-card px-3 flex items-center gap-2 z-50 sm:hidden border-b border-border">
+          <div className="relative flex-1">
+            <form onSubmit={handleSearchSubmit} className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+              <Input
+                ref={mobileSearchInputRef}
+                type="search"
+                aria-label="Tìm kiếm nhanh"
+                placeholder="Tìm môn học, bài tập, ghi chú..."
+                className="pl-9 pr-8 h-9"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => {
+                  if (searchResults && searchQuery.trim()) setSearchOpen(true);
+                }}
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={handleClearSearch}
+                  aria-label="Xóa từ khóa tìm kiếm"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </form>
+            {renderSearchDropdown()}
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setMobileSearchOpen(false);
+              setSearchOpen(false);
+            }}
+          >
+            Đóng
+          </Button>
+        </div>
+      )}
+
       <div className="flex items-center gap-2 flex-1 min-w-0">
         <MobileMenuButton onClick={onMobileMenuClick} />
 
-        {/* Global Search */}
+        {/* Mobile search trigger */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Mở tìm kiếm nhanh"
+          className="sm:hidden h-9 w-9 text-muted-foreground hover:text-foreground"
+          onClick={() => {
+            setMobileSearchOpen(true);
+            setTimeout(() => mobileSearchInputRef.current?.focus(), 20);
+          }}
+        >
+          <Search className="w-5 h-5" />
+        </Button>
+
+        {/* Desktop & Tablet Global Search */}
         <div className="relative hidden sm:block max-w-md flex-1">
-          <form onSubmit={handleSearch} className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <form onSubmit={handleSearchSubmit} className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
             <Input
+              ref={searchInputRef}
+              type="search"
+              aria-label="Tìm kiếm môn học, ghi chú, bài tập, lịch thi"
               placeholder="Tìm môn học, ghi chú, bài tập, lịch thi..."
-              className="pl-9"
+              className="pl-9 pr-16 h-9 bg-background/70 focus:bg-background"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => {
                 if (searchResults && searchQuery.trim()) setSearchOpen(true);
               }}
             />
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {isSearching ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
+              ) : searchQuery ? (
+                <button
+                  type="button"
+                  onClick={handleClearSearch}
+                  aria-label="Xóa từ khóa tìm kiếm"
+                  className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <kbd className="hidden lg:inline-flex items-center rounded border border-border bg-muted/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground select-none">
+                  Ctrl K
+                </kbd>
+              )}
+            </div>
           </form>
 
-          {searchOpen && searchResults && (
-            <>
-              <div
-                className="fixed inset-0 z-40"
-                onClick={() => setSearchOpen(false)}
-              />
-              <div className="absolute left-0 right-0 top-11 z-50 rounded-lg border bg-popover text-popover-foreground shadow-lg max-h-[70vh] overflow-y-auto p-2 space-y-2">
-                {totalSearchHits === 0 ? (
-                  <p className="text-xs text-muted-foreground text-center py-4">
-                    Không tìm thấy kết quả cho &ldquo;{searchQuery}&rdquo;
-                  </p>
-                ) : (
-                  <>
-                    {searchResults.courses.length > 0 && (
-                      <div className="space-y-1">
-                        <p className="px-2 text-[11px] font-semibold uppercase text-muted-foreground">
-                          Môn học
-                        </p>
-                        {searchResults.courses.map((c) => (
-                          <button
-                            key={c.id}
-                            type="button"
-                            onClick={() => {
-                              setSearchOpen(false);
-                              router.push('/courses');
-                            }}
-                            className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent text-left"
-                          >
-                            <BookOpen className="w-3.5 h-3.5 shrink-0" style={{ color: c.color }} />
-                            <span className="truncate font-medium">{c.name}</span>
-                            <span className="text-xs text-muted-foreground ml-auto">{c.courseCode}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {searchResults.notes.length > 0 && (
-                      <div className="space-y-1">
-                        <p className="px-2 text-[11px] font-semibold uppercase text-muted-foreground">
-                          Ghi chú buổi học
-                        </p>
-                        {searchResults.notes.map((n) => (
-                          <button
-                            key={n.id}
-                            type="button"
-                            onClick={() => {
-                              setSearchOpen(false);
-                              router.push(`/notes?search=${encodeURIComponent(searchQuery.trim())}`);
-                            }}
-                            className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent text-left"
-                          >
-                            <StickyNote className="w-3.5 h-3.5 shrink-0 text-amber-500" />
-                            <span className="truncate">{n.course.name}</span>
-                            <span className="text-xs text-muted-foreground ml-auto">
-                              {formatShortDate(n.date)}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {searchResults.assignments.length > 0 && (
-                      <div className="space-y-1">
-                        <p className="px-2 text-[11px] font-semibold uppercase text-muted-foreground">
-                          Bài tập
-                        </p>
-                        {searchResults.assignments.map((a) => (
-                          <button
-                            key={a.id}
-                            type="button"
-                            onClick={() => {
-                              setSearchOpen(false);
-                              router.push('/assignments');
-                            }}
-                            className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent text-left"
-                          >
-                            <ClipboardList className="w-3.5 h-3.5 shrink-0 text-primary" />
-                            <span className="truncate">{a.title}</span>
-                            <span className="text-xs text-muted-foreground ml-auto">
-                              {formatShortDate(a.dueDate)}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {searchResults.exams.length > 0 && (
-                      <div className="space-y-1">
-                        <p className="px-2 text-[11px] font-semibold uppercase text-muted-foreground">
-                          Lịch thi
-                        </p>
-                        {searchResults.exams.map((ex) => (
-                          <button
-                            key={ex.id}
-                            type="button"
-                            onClick={() => {
-                              setSearchOpen(false);
-                              router.push('/exams');
-                            }}
-                            className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent text-left"
-                          >
-                            <FileText className="w-3.5 h-3.5 shrink-0 text-rose-500" />
-                            <span className="truncate">{ex.title}</span>
-                            <span className="text-xs text-muted-foreground ml-auto">
-                              {formatShortDate(ex.date)}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </>
-          )}
+          {renderSearchDropdown()}
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 sm:gap-2">
         {/* Semester selector */}
         {semesters.length > 0 && (
           <Select value={activeSemester} onValueChange={handleSemesterChange}>
-            <SelectTrigger className="w-[180px] lg:w-[210px] hidden md:flex">
+            <SelectTrigger
+              aria-label="Chọn học kỳ hiện tại"
+              className="w-[155px] lg:w-[205px] h-9 hidden md:flex rounded-lg bg-background/70 text-xs sm:text-sm"
+            >
               <SelectValue placeholder="Chọn học kỳ" />
             </SelectTrigger>
             <SelectContent>
@@ -434,47 +594,75 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
         {/* Quick add */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" className="gap-1">
+            <Button size="sm" className="h-9 gap-1.5 px-3">
               <Plus className="w-4 h-4" />
               <span className="hidden sm:inline">Thêm mới</span>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Thêm nhanh</DropdownMenuLabel>
+          <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5">
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              Tạo nhanh
+            </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => router.push('/courses?action=new')}>
+            <DropdownMenuItem
+              onClick={() => router.push('/courses?action=new')}
+              className="gap-2 rounded-lg cursor-pointer"
+            >
+              <BookOpen className="w-4 h-4 text-primary" />
               Môn học & Lịch học
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => router.push('/assignments?action=new')}>
+            <DropdownMenuItem
+              onClick={() => router.push('/assignments?action=new')}
+              className="gap-2 rounded-lg cursor-pointer"
+            >
+              <ClipboardList className="w-4 h-4 text-amber-500" />
               Bài tập mới
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => router.push('/exams?action=new')}>
+            <DropdownMenuItem
+              onClick={() => router.push('/exams?action=new')}
+              className="gap-2 rounded-lg cursor-pointer"
+            >
+              <FileText className="w-4 h-4 text-rose-500" />
               Lịch thi mới
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
         {/* Theme toggle */}
-        {mounted && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            aria-label="Chuyển giao diện sáng/tối"
-          >
-            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-          </Button>
-        )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-9 w-9 text-muted-foreground hover:text-foreground"
+          onClick={() => setTheme(isDark ? 'light' : 'dark')}
+          aria-label={isDark ? 'Chuyển sang chế độ sáng' : 'Chuyển sang chế độ tối'}
+        >
+          {isDark ? (
+            <Sun className="w-[18px] h-[18px] text-amber-500" />
+          ) : (
+            <Moon className="w-[18px] h-[18px]" />
+          )}
+        </Button>
 
         {/* Notifications */}
-        <Popover>
+        <Popover open={notifyOpen} onOpenChange={setNotifyOpen}>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="icon" className="relative" aria-label="Thông báo">
-              <Bell className="w-5 h-5" />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="relative h-9 w-9 text-muted-foreground hover:text-foreground"
+              aria-label={
+                notifications.length > 0
+                  ? `Thông báo (${notifications.length} mục)`
+                  : 'Thông báo'
+              }
+            >
+              <Bell className="w-[18px] h-[18px]" />
               {notifications.length > 0 && (
                 <span
                   className={cn(
-                    'absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full text-[10px] font-bold flex items-center justify-center px-1 text-white',
+                    'absolute top-0.5 right-0.5 min-w-[17px] h-[17px] rounded-full text-[10px] font-bold flex items-center justify-center px-1 text-white ring-2 ring-card',
                     urgentCount > 0 ? 'bg-rose-600' : 'bg-primary'
                   )}
                 >
@@ -483,43 +671,66 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
               )}
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-80 p-0">
-            <div className="flex items-center justify-between px-4 py-3 border-b">
-              <span className="font-semibold text-sm">Nhắc lịch & Deadline</span>
+          <PopoverContent align="end" className="w-80 sm:w-[340px] rounded-xl p-0 overflow-hidden shadow-elevated">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-sm text-foreground">
+                  Nhắc lịch & Deadline
+                </span>
+                {urgentCount > 0 && (
+                  <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4">
+                    {urgentCount} gấp
+                  </Badge>
+                )}
+              </div>
               {!browserNotifyEnabled && (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="h-7 text-[11px] px-2 text-primary"
+                  className="h-7 text-[11px] px-2 text-primary hover:text-primary"
                   onClick={handleRequestBrowserNotify}
                 >
-                  Bật nhắc giờ học
+                  Bật nhắc giờ
                 </Button>
               )}
             </div>
-            <div className="max-h-80 overflow-y-auto divide-y">
+            <div className="max-h-80 overflow-y-auto divide-y divide-border/70">
               {notifications.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-6">
-                  Không có lịch học hay deadline sắp tới
-                </p>
+                <div className="py-8 px-4 text-center space-y-1.5">
+                  <Bell className="w-6 h-6 text-muted-foreground/50 mx-auto" />
+                  <p className="text-xs font-medium text-foreground">
+                    Không có thông báo mới
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Lịch học sắp tới và deadline bài tập sẽ xuất hiện tại đây.
+                  </p>
+                </div>
               ) : (
                 notifications.map((item) => (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => router.push(item.href)}
-                    className="w-full text-left px-4 py-2.5 hover:bg-accent/50 transition-colors flex items-start gap-2.5"
+                    onClick={() => {
+                      setNotifyOpen(false);
+                      router.push(item.href);
+                    }}
+                    className="w-full text-left px-4 py-3 hover:bg-accent/60 transition-colors flex items-start gap-3"
                   >
                     <span
-                      className="w-2 h-2 rounded-full mt-1.5 shrink-0"
+                      className="w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ring-2 ring-background"
                       style={{ backgroundColor: item.color || '#3b82f6' }}
                     />
                     <div className="min-w-0 flex-1 space-y-0.5">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold truncate">{item.title}</p>
+                        <p className="text-xs font-semibold text-foreground truncate">
+                          {item.title}
+                        </p>
                         {item.urgent && (
-                          <Badge variant="destructive" className="text-[9px] px-1.5 py-0 h-4 shrink-0">
+                          <Badge
+                            variant="destructive"
+                            className="text-[9px] px-1.5 py-0 h-4 shrink-0"
+                          >
                             Gấp
                           </Badge>
                         )}
@@ -538,32 +749,55 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
         {/* User profile */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="rounded-full">
-              <Avatar className="w-8 h-8">
-                <AvatarFallback className="text-xs">{userInitial}</AvatarFallback>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Tài khoản cá nhân"
+              className="h-9 w-9 rounded-full"
+            >
+              <Avatar className="w-8 h-8 ring-1 ring-border">
+                <AvatarFallback className="text-xs font-semibold bg-primary/10 text-primary dark:text-blue-400">
+                  {userInitial}
+                </AvatarFallback>
               </Avatar>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel>
-              <p className="font-medium truncate">{session?.user?.name || 'Sinh viên'}</p>
+          <DropdownMenuContent align="end" className="w-56 rounded-xl p-1.5">
+            <DropdownMenuLabel className="px-2.5 py-2">
+              <p className="font-semibold text-sm text-foreground truncate">
+                {session?.user?.name || 'Sinh viên'}
+              </p>
               <p className="text-xs text-muted-foreground font-normal truncate">
                 {session?.user?.email}
               </p>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => router.push('/schedule')}>
-              <Calendar className="w-4 h-4 mr-2" />
+            <DropdownMenuItem
+              onClick={() => router.push('/dashboard')}
+              className="rounded-lg cursor-pointer"
+            >
+              <LayoutDashboard className="w-4 h-4 mr-2 text-muted-foreground" />
+              Tổng quan
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => router.push('/schedule')}
+              className="rounded-lg cursor-pointer"
+            >
+              <Calendar className="w-4 h-4 mr-2 text-muted-foreground" />
               Thời khóa biểu
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => router.push('/settings')}>
-              <Settings className="w-4 h-4 mr-2" />
+            <DropdownMenuItem
+              onClick={() => router.push('/settings')}
+              className="rounded-lg cursor-pointer"
+            >
+              <Settings className="w-4 h-4 mr-2 text-muted-foreground" />
               Cài đặt & Dữ liệu
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => signOut({ callbackUrl: '/login' })}
-              className="text-destructive focus:text-destructive"
+              className="rounded-lg cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
             >
               <LogOut className="w-4 h-4 mr-2" />
               Đăng xuất
@@ -573,8 +807,4 @@ export function Topbar({ onMobileMenuClick }: TopbarProps) {
       </div>
     </header>
   );
-
-  function handleSearch(e: React.FormEvent) {
-    handleSearchSubmit(e);
-  }
-}
+});

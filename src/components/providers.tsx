@@ -18,36 +18,46 @@ export function Providers({ children, session }: ProvidersProps) {
   useEffect(() => {
     // 1. Clean up any stale or lingering service workers to avoid reload loops
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then((registrations) => {
-        for (const registration of registrations) {
-          registration.unregister().catch(() => {});
-        }
-      }).catch(() => {});
+      navigator.serviceWorker
+        .getRegistrations()
+        .then((registrations) => {
+          for (const registration of registrations) {
+            registration.unregister().catch(() => {});
+          }
+        })
+        .catch(() => {});
     }
 
     // 2. Debounce rapid repeated F5 / Ctrl+R to avoid spamming page reloads and browser freezes
     const handleKeyDown = (e: KeyboardEvent) => {
       const isReload =
-        e.key === 'F5' ||
-        ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R'));
+        e.key === 'F5' || ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R'));
 
       if (!isReload) return;
 
       const now = Date.now();
-      const lastSessionReload = Number(sessionStorage.getItem('__ws_last_reload') || '0');
+      let lastSessionReload = 0;
+      try {
+        lastSessionReload = Number(sessionStorage.getItem('__ws_last_reload') || '0');
+      } catch {
+        // ignore storage restrictions
+      }
       const diffKey = now - lastKeyTimeRef.current;
       const diffSession = now - lastSessionReload;
       lastKeyTimeRef.current = now;
 
-      // Prevent spamming reloads within 1.2s
       if (diffKey < 1200 || diffSession < 1200) {
         e.preventDefault();
         e.stopPropagation();
         toast.info('Trang vừa được tải, vui lòng không nhấn F5 quá nhanh.');
-        return false;
+        return;
       }
 
-      sessionStorage.setItem('__ws_last_reload', String(now));
+      try {
+        sessionStorage.setItem('__ws_last_reload', String(now));
+      } catch {
+        // ignore storage restrictions
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown, { capture: true });
@@ -59,9 +69,7 @@ export function Providers({ children, session }: ProvidersProps) {
   return (
     <SessionProvider session={session} refetchOnWindowFocus={false} refetchWhenOffline={false}>
       <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
-        <TooltipProvider delayDuration={0}>
-          {children}
-        </TooltipProvider>
+        <TooltipProvider delayDuration={150}>{children}</TooltipProvider>
       </ThemeProvider>
     </SessionProvider>
   );

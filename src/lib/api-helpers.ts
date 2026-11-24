@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import {
@@ -34,13 +35,14 @@ export async function requireAuth(): Promise<string> {
   return userId;
 }
 
-export async function getActiveSemester(userId: string) {
-  let semester = await prisma.semester.findFirst({
+export async function getActiveSemester(userId: string, tx?: Prisma.TransactionClient) {
+  const db = tx ?? prisma;
+  let semester = await db.semester.findFirst({
     where: { userId, isActive: true },
   });
 
   if (!semester) {
-    semester = await prisma.semester.findFirst({
+    semester = await db.semester.findFirst({
       where: { userId },
       orderBy: { createdAt: 'desc' },
     });
@@ -72,133 +74,150 @@ function hasSessionUserData(sess: {
 
 /**
  * Sinh các buổi học (CourseSession) cho lịch lặp (Schedule) theo múi giờ Asia/Ho_Chi_Minh.
+ * - Khóa PostgreSQL Advisory Lock trước mọi thao tác đọc/tính toán để loại trừ race condition.
  * - Không tạo bản ghi trùng ngày cho cùng một schedule.
  * - Bảo toàn ghi chú, checklist, tài liệu, bài tập và trạng thái của các buổi đã có.
+ * - Không xóa bản ghi nào nếu cả hai session trùng đều chứa dữ liệu người dùng.
+ * - Hỗ trợ truyền Prisma TransactionClient để hoạt động nguyên tử trong transaction import.
  */
-export async function generateSessions(scheduleId: string) {
-  const schedule = await prisma.schedule.findUnique({
-    where: { id: scheduleId },
-    include: { course: true },
-  });
+export async function generateSessions(scheduleId: string, tx?: Prisma.TransactionClient): Promise<number> {
+  const runGeneration = async (client: Prisma.TransactionClient): Promise<number> => {
+    // 1. LẤY ADVISORY LOCK ĐẦU TIÊN: Tuần tự hóa các yêu cầu tạo/sửa đồng thời trước khi đọc
+    await client.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`schedule:${scheduleId}`}))`;
 
-  if (!schedule) return 0;
+    // 2. ĐỌC DỮ LIỆU BÊN TRONG TRANSACTION ĐÃ CÓ KHÓA
+    const schedule = await client.schedule.findUnique({
+      where: { id: scheduleId },
+      include: { course: true },
+    });
 
-  const startDate = parseVnDate(schedule.startDate);
-  const endDate = parseVnDate(schedule.endDate);
+    if (!schedule) return 0;
 
-  const targetDates: Date[] = [];
-  let current = parseVnDate(startDate);
+    const startDate = parseVnDate(schedule.startDate);
+    const endDate = parseVnDate(schedule.endDate);
 
-  while (getVnDayOfWeek(current) !== schedule.dayOfWeek && current <= endDate) {
-    current = addVnDays(current, 1);
-  }
+    const targetDates: Date[] = [];
+    let current = parseVnDate(startDate);
 
-  const seenDateKeys = new Set<string>();
-  while (current <= endDate) {
-    const weekNumber = getWeekNumberFromStart(current, startDate);
-    let shouldAdd = true;
-    if (schedule.weekType === 'even' && weekNumber % 2 !== 0) shouldAdd = false;
-    if (schedule.weekType === 'odd' && weekNumber % 2 === 0) shouldAdd = false;
-
-    const dateKey = toVnDateString(current);
-    if (shouldAdd && !seenDateKeys.has(dateKey)) {
-      seenDateKeys.add(dateKey);
-      targetDates.push(parseVnDate(dateKey));
+    while (getVnDayOfWeek(current) !== schedule.dayOfWeek && current <= endDate) {
+      current = addVnDays(current, 1);
     }
 
-    current = addVnDays(current, 7);
-  }
+    const seenDateKeys = new Set<string>();
+    while (current <= endDate) {
+      const weekNumber = getWeekNumberFromStart(current, startDate);
+      let shouldAdd = true;
+      if (schedule.weekType === 'even' && weekNumber % 2 !== 0) shouldAdd = false;
+      if (schedule.weekType === 'odd' && weekNumber % 2 === 0) shouldAdd = false;
 
-  const existingSessions = await prisma.courseSession.findMany({
-    where: { scheduleId },
-    include: {
-      _count: {
-        select: { checklist: true, resources: true, assignments: true },
+      const dateKey = toVnDateString(current);
+      if (shouldAdd && !seenDateKeys.has(dateKey)) {
+        seenDateKeys.add(dateKey);
+        targetDates.push(parseVnDate(dateKey));
+      }
+
+      current = addVnDays(current, 7);
+    }
+
+    // 3. ĐỌC EXISTING SESSIONS TRONG TRANSACTION ĐÃ KHÓA
+    const existingSessions = await client.courseSession.findMany({
+      where: { scheduleId },
+      include: {
+        _count: {
+          select: { checklist: true, resources: true, assignments: true },
+        },
       },
-    },
-  });
+    });
 
-  const existingByDate = new Map<string, (typeof existingSessions)[number]>();
-  const duplicateIdsToDelete: string[] = [];
+    // 4. TÍNH TOÁN DEDUPLICATION VÀ CÁC MẢNG THAY ĐỔI
+    const existingByDate = new Map<string, (typeof existingSessions)[number]>();
+    const duplicateIdsToDelete: string[] = [];
 
-  for (const sess of existingSessions) {
-    const key = toVnDateString(sess.date);
-    if (existingByDate.has(key)) {
-      const existing = existingByDate.get(key)!;
-      if (!hasSessionUserData(existing) && hasSessionUserData(sess)) {
-        duplicateIdsToDelete.push(existing.id);
-        existingByDate.set(key, sess);
+    for (const sess of existingSessions) {
+      const key = toVnDateString(sess.date);
+      if (existingByDate.has(key)) {
+        const existing = existingByDate.get(key)!;
+        const existingHasData = hasSessionUserData(existing);
+        const sessHasData = hasSessionUserData(sess);
+
+        if (!existingHasData && sessHasData) {
+          duplicateIdsToDelete.push(existing.id);
+          existingByDate.set(key, sess);
+        } else if (existingHasData && !sessHasData) {
+          duplicateIdsToDelete.push(sess.id);
+        } else if (!existingHasData && !sessHasData) {
+          duplicateIdsToDelete.push(sess.id);
+        }
+        // NẾU CẢ HAI ĐỀU CÓ DỮ LIỆU NGƯỜI DÙNG:
+        // Tuyệt đối không xóa bất kỳ session nào, giữ nguyên cả hai để bảo vệ ghi chú/checklist!
       } else {
-        duplicateIdsToDelete.push(sess.id);
+        existingByDate.set(key, sess);
       }
-    } else {
-      existingByDate.set(key, sess);
     }
-  }
 
-  const todayKey = toVnDateString(new Date());
-  const toCreate: {
-    date: Date;
-    startTime: string;
-    endTime: string;
-    room: string | null;
-    location: string | null;
-    courseId: string;
-    scheduleId: string;
-    type: string;
-    status: string;
-  }[] = [];
+    const todayKey = toVnDateString(new Date());
+    const toCreate: {
+      date: Date;
+      startTime: string;
+      endTime: string;
+      room: string | null;
+      location: string | null;
+      courseId: string;
+      scheduleId: string;
+      type: string;
+      status: string;
+    }[] = [];
 
-  const toUpdateIds: string[] = [];
+    const toUpdateIds: string[] = [];
 
-  for (const targetDate of targetDates) {
-    const key = toVnDateString(targetDate);
-    const existing = existingByDate.get(key);
-    if (existing) {
-      if (existing.type === 'regular') {
-        toUpdateIds.push(existing.id);
+    for (const targetDate of targetDates) {
+      const key = toVnDateString(targetDate);
+      const existing = existingByDate.get(key);
+      if (existing) {
+        if (existing.type === 'regular') {
+          toUpdateIds.push(existing.id);
+        }
+        existingByDate.delete(key);
+      } else {
+        toCreate.push({
+          date: targetDate,
+          startTime: schedule.startTime,
+          endTime: schedule.endTime,
+          room: schedule.room,
+          location: schedule.location,
+          courseId: schedule.courseId,
+          scheduleId: schedule.id,
+          type: 'regular',
+          status: key < todayKey ? 'completed' : 'upcoming',
+        });
       }
-      existingByDate.delete(key);
-    } else {
-      toCreate.push({
-        date: targetDate,
-        startTime: schedule.startTime,
-        endTime: schedule.endTime,
-        room: schedule.room,
-        location: schedule.location,
-        courseId: schedule.courseId,
-        scheduleId: schedule.id,
-        type: 'regular',
-        status: key < todayKey ? 'completed' : 'upcoming',
-      });
     }
-  }
 
-  const idsToDelete = [...duplicateIdsToDelete];
-  const idsToDetach: string[] = [];
+    const idsToDelete = [...duplicateIdsToDelete];
+    const idsToDetach: string[] = [];
 
-  for (const sess of Array.from(existingByDate.values())) {
-    if (sess.type === 'regular' && !hasSessionUserData(sess) && sess.status === 'upcoming') {
-      idsToDelete.push(sess.id);
-    } else {
-      idsToDetach.push(sess.id);
+    for (const sess of Array.from(existingByDate.values())) {
+      if (sess.type === 'regular' && !hasSessionUserData(sess) && sess.status === 'upcoming') {
+        idsToDelete.push(sess.id);
+      } else {
+        idsToDetach.push(sess.id);
+      }
     }
-  }
 
-  await prisma.$transaction(async (tx) => {
+    // 5. THỰC THI GHI VÀO DB BÊN TRONG TRANSACTION
     if (idsToDelete.length > 0) {
-      await tx.courseSession.deleteMany({
+      await client.courseSession.deleteMany({
         where: { id: { in: idsToDelete } },
       });
     }
     if (idsToDetach.length > 0) {
-      await tx.courseSession.updateMany({
+      await client.courseSession.updateMany({
         where: { id: { in: idsToDetach } },
         data: { scheduleId: null },
       });
     }
     if (toUpdateIds.length > 0) {
-      await tx.courseSession.updateMany({
+      await client.courseSession.updateMany({
         where: { id: { in: toUpdateIds } },
         data: {
           startTime: schedule.startTime,
@@ -209,13 +228,19 @@ export async function generateSessions(scheduleId: string) {
       });
     }
     if (toCreate.length > 0) {
-      await tx.courseSession.createMany({
+      await client.courseSession.createMany({
         data: toCreate,
       });
     }
-  });
 
-  return targetDates.length;
+    return targetDates.length;
+  };
+
+  if (tx) {
+    return await runGeneration(tx);
+  } else {
+    return await prisma.$transaction(runGeneration);
+  }
 }
 
 export function timeOverlaps(
@@ -263,7 +288,8 @@ export async function checkScheduleConflicts(
   dayOfWeekArg?: number,
   startTimeArg?: string,
   endTimeArg?: string,
-  excludeScheduleIdArg?: string
+  excludeScheduleIdArg?: string,
+  tx?: Prisma.TransactionClient
 ) {
   const opts: ConflictCheckOptions =
     typeof userIdOrOpts === 'string'
@@ -276,7 +302,8 @@ export async function checkScheduleConflicts(
         }
       : userIdOrOpts;
 
-  const existingSchedules = await prisma.schedule.findMany({
+  const db = tx ?? prisma;
+  const existingSchedules = await db.schedule.findMany({
     where: {
       course: { userId: opts.userId },
       dayOfWeek: opts.dayOfWeek,
