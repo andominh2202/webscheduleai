@@ -1,19 +1,66 @@
 {
+  "id": "/dashboard",
   "name": "WebSchedule - Quản lý lịch học thông minh",
   "short_name": "WebSchedule",
-  "description": "Ứng dụng quản lý thời khóa biểu, ghi chú buổi học, bài tập và lịch thi dành cho sinh viên.",
+  "description": "Ứng dụng quản lý thời khóa biểu, ghi chú buổi học, bài tập, lịch thi và tính GPA dành cho sinh viên.",
   "start_url": "/dashboard",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
+  "orientation": "portrait",
+  "background_color": "#f8fafc",
   "theme_color": "#2563eb",
   "lang": "vi",
+  "categories": ["education", "productivity"],
   "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
     {
       "src": "/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Thời khóa biểu",
+      "short_name": "Lịch học",
+      "url": "/schedule",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Bài tập",
+      "short_name": "Bài tập",
+      "url": "/assignments",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Lịch thi",
+      "short_name": "Lịch thi",
+      "url": "/exams",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Tính GPA",
+      "short_name": "GPA",
+      "url": "/gpa",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }
-

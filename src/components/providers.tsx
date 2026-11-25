@@ -16,16 +16,20 @@ export function Providers({ children, session }: ProvidersProps) {
   const lastKeyTimeRef = useRef(0);
 
   useEffect(() => {
-    // 1. Clean up any stale or lingering service workers to avoid reload loops
+    // 1. Register minimal PWA service worker in production so mobile browsers enable "Install App"
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-      navigator.serviceWorker
-        .getRegistrations()
-        .then((registrations) => {
-          for (const registration of registrations) {
-            registration.unregister().catch(() => {});
-          }
-        })
-        .catch(() => {});
+      if (process.env.NODE_ENV === 'production') {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      } else {
+        navigator.serviceWorker
+          .getRegistrations()
+          .then((registrations) => {
+            for (const registration of registrations) {
+              registration.unregister().catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
     }
 
     // 2. Debounce rapid repeated F5 / Ctrl+R to avoid spamming page reloads and browser freezes

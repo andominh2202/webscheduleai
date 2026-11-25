@@ -5,6 +5,8 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
+import { MobileBottomNav } from './mobile-bottom-nav';
+import { PwaInstallBanner } from './pwa-install-banner';
 
 const SIDEBAR_STORAGE_KEY = '__ws_sidebar_collapsed';
 
@@ -88,12 +90,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <main
           id="main-content"
           tabIndex={-1}
-          className="flex-1 w-full max-w-[1600px] mx-auto p-4 sm:p-5 md:p-6 focus:outline-none"
+          className="flex-1 w-full max-w-[1600px] mx-auto p-4 pb-24 sm:p-5 sm:pb-24 md:p-6 lg:pb-6 focus:outline-none"
         >
+          <PwaInstallBanner />
           <div key={pathname} className="page-transition">
             {children}
           </div>
         </main>
+        <MobileBottomNav onOpenMore={handleMobileOpen} />
       </div>
     </div>
   );
