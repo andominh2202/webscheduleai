@@ -24,6 +24,19 @@
 
         </activity>
 
+        <receiver
+            android:name=".ScheduleWidgetProvider"
+            android:exported="true"
+            android:label="WebSchedule - Lịch học hôm nay">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.webschedule.app.ACTION_WIDGET_REFRESH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/schedule_widget_info" />
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
