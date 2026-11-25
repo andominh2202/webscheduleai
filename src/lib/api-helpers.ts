@@ -83,7 +83,7 @@ function hasSessionUserData(sess: {
 export async function generateSessions(scheduleId: string, tx?: Prisma.TransactionClient): Promise<number> {
   const runGeneration = async (client: Prisma.TransactionClient): Promise<number> => {
     // 1. LẤY ADVISORY LOCK ĐẦU TIÊN: Tuần tự hóa các yêu cầu tạo/sửa đồng thời trước khi đọc
-    await client.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`schedule:${scheduleId}`}))`;
+    await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`schedule:${scheduleId}`}))`;
 
     // 2. ĐỌC DỮ LIỆU BÊN TRONG TRANSACTION ĐÃ CÓ KHÓA
     const schedule = await client.schedule.findUnique({
