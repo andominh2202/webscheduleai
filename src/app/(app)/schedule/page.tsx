@@ -601,7 +601,33 @@ export default function SchedulePage() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Không thể đọc ảnh');
         const nextRows: RecognizedImageRow[] = (data.rows || []).map(
-          (row: RecognizedImageRow) => applyPeriod(row, classPeriods)
+          (row: RecognizedImageRow) => {
+            const withPeriod = applyPeriod(row, classPeriods);
+            const autoLastWeek =
+              withPeriod.lastWeek > 0
+                ? withPeriod.lastWeek
+                : isValidIsoDate(withPeriod.startDate) &&
+                    isValidIsoDate(withPeriod.endDate) &&
+                    isValidDateRange(withPeriod.startDate, withPeriod.endDate)
+                  ? Math.max(
+                      1,
+                      Math.ceil(
+                        (Math.round(
+                          (new Date(withPeriod.endDate + 'T12:00:00Z').getTime() -
+                            new Date(withPeriod.startDate + 'T12:00:00Z').getTime()) /
+                            86400000
+                        ) +
+                          1) /
+                          7
+                      )
+                    )
+                  : 0;
+            return {
+              ...withPeriod,
+              firstWeek: Math.max(1, withPeriod.firstWeek || 1),
+              lastWeek: autoLastWeek,
+            };
+          }
         );
         setImageRows(nextRows);
         const missingCount = nextRows.filter(
@@ -666,6 +692,21 @@ export default function SchedulePage() {
             ? Number(value)
             : value,
         };
+        if (
+          (key === 'startDate' || key === 'endDate' || ((key === 'dayOfWeek' || key === 'ca') && updated.lastWeek <= 0)) &&
+          isValidIsoDate(updated.startDate) &&
+          isValidIsoDate(updated.endDate) &&
+          isValidDateRange(updated.startDate, updated.endDate)
+        ) {
+          const totalDays =
+            Math.round(
+              (new Date(updated.endDate + 'T12:00:00Z').getTime() -
+                new Date(updated.startDate + 'T12:00:00Z').getTime()) /
+                86400000
+            ) + 1;
+          updated.firstWeek = Math.max(1, updated.firstWeek || 1);
+          updated.lastWeek = Math.max(updated.firstWeek, Math.ceil(totalDays / 7));
+        }
         return {
           ...updated,
           needsSchedule:
@@ -1274,18 +1315,42 @@ export default function SchedulePage() {
                               </span>
                             )}
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 text-xs text-destructive hover:text-destructive shrink-0"
-                            onClick={() =>
-                              setImageRows((previous) =>
-                                previous.filter((_, i) => i !== index)
-                              )
-                            }
-                          >
-                            Bỏ dòng này
-                          </Button>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              onClick={() =>
+                                setImageRows((previous) => {
+                                  const clone: RecognizedImageRow = {
+                                    ...row,
+                                    dayOfWeek: -1,
+                                    needsSchedule: true,
+                                  };
+                                  return [
+                                    ...previous.slice(0, index + 1),
+                                    clone,
+                                    ...previous.slice(index + 1),
+                                  ];
+                                })
+                              }
+                            >
+                              + Thêm ngày học
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                              onClick={() =>
+                                setImageRows((previous) =>
+                                  previous.filter((_, i) => i !== index)
+                                )
+                              }
+                            >
+                              Bỏ dòng này
+                            </Button>
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
