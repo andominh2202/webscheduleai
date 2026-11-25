@@ -72,6 +72,7 @@ const providers = [
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
   session: { strategy: 'jwt' },
+  trustHost: true,
   secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || 'webschedule-super-secret-key-32chars-min-length-dev',
   pages: {
     signIn: '/login',
