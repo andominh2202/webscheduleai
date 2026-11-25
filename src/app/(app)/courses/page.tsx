@@ -151,6 +151,10 @@ function CoursesPageContent() {
   }, [fetchData]);
 
   React.useEffect(() => {
+    const paramSearch = searchParams.get('search');
+    if (paramSearch !== null) {
+      setSearchQuery(paramSearch);
+    }
     if (searchParams.get('action') === 'new') {
       setEditingCourse(null);
       setDialogOpen(true);

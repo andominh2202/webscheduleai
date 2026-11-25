@@ -375,7 +375,11 @@ export const Topbar = memo(function Topbar({ onMobileMenuClick }: TopbarProps) {
                     <button
                       key={c.id}
                       type="button"
-                      onClick={() => handleNavigateFromSearch('/courses')}
+                      onClick={() =>
+                        handleNavigateFromSearch(
+                          `/courses?search=${encodeURIComponent(c.courseCode || c.name)}`
+                        )
+                      }
                       className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-accent transition-colors text-left"
                     >
                       <BookOpen className="w-4 h-4 shrink-0" style={{ color: c.color }} />
