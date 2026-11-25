@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { format } from 'date-fns';
+import { format, getISOWeek } from 'date-fns';
 import {
   AlertTriangle,
   CalendarDays,
@@ -603,29 +603,24 @@ export default function SchedulePage() {
         const nextRows: RecognizedImageRow[] = (data.rows || []).map(
           (row: RecognizedImageRow) => {
             const withPeriod = applyPeriod(row, classPeriods);
-            const autoLastWeek =
-              withPeriod.lastWeek > 0
-                ? withPeriod.lastWeek
-                : isValidIsoDate(withPeriod.startDate) &&
-                    isValidIsoDate(withPeriod.endDate) &&
-                    isValidDateRange(withPeriod.startDate, withPeriod.endDate)
-                  ? Math.max(
-                      1,
-                      Math.ceil(
-                        (Math.round(
-                          (new Date(withPeriod.endDate + 'T12:00:00Z').getTime() -
-                            new Date(withPeriod.startDate + 'T12:00:00Z').getTime()) /
-                            86400000
-                        ) +
-                          1) /
-                          7
-                      )
-                    )
-                  : 0;
+            const hasValidRange =
+              isValidIsoDate(withPeriod.startDate) &&
+              isValidIsoDate(withPeriod.endDate) &&
+              isValidDateRange(withPeriod.startDate, withPeriod.endDate);
+            const startWeek = isValidIsoDate(withPeriod.startDate)
+              ? getISOWeek(new Date(withPeriod.startDate + 'T12:00:00'))
+              : 1;
+            const endWeek = hasValidRange
+              ? getISOWeek(new Date(withPeriod.endDate + 'T12:00:00'))
+              : startWeek;
             return {
               ...withPeriod,
-              firstWeek: Math.max(1, withPeriod.firstWeek || 1),
-              lastWeek: autoLastWeek,
+              firstWeek:
+                withPeriod.lastWeek > 0 && withPeriod.firstWeek > 0
+                  ? withPeriod.firstWeek
+                  : startWeek,
+              lastWeek:
+                withPeriod.lastWeek > 0 ? withPeriod.lastWeek : endWeek,
             };
           }
         );
@@ -698,14 +693,10 @@ export default function SchedulePage() {
           isValidIsoDate(updated.endDate) &&
           isValidDateRange(updated.startDate, updated.endDate)
         ) {
-          const totalDays =
-            Math.round(
-              (new Date(updated.endDate + 'T12:00:00Z').getTime() -
-                new Date(updated.startDate + 'T12:00:00Z').getTime()) /
-                86400000
-            ) + 1;
-          updated.firstWeek = Math.max(1, updated.firstWeek || 1);
-          updated.lastWeek = Math.max(updated.firstWeek, Math.ceil(totalDays / 7));
+          const startWeek = getISOWeek(new Date(updated.startDate + 'T12:00:00'));
+          const endWeek = getISOWeek(new Date(updated.endDate + 'T12:00:00'));
+          updated.firstWeek = startWeek;
+          updated.lastWeek = Math.max(startWeek, endWeek);
         }
         return {
           ...updated,
@@ -764,15 +755,16 @@ export default function SchedulePage() {
     const lines = [headers.map(csvEscape).join(',')];
     for (const row of imageRows) {
       const base = new Date(row.startDate + 'T12:00:00');
+      const baseWeek = getISOWeek(base);
+      const startOffset = row.firstWeek > 0 ? row.firstWeek - baseWeek : 0;
       const start = new Date(base);
-      start.setDate(start.getDate() + (Math.max(1, row.firstWeek) - 1) * 7);
+      start.setDate(start.getDate() + startOffset * 7);
       const end = new Date(base);
-      end.setDate(
-        end.getDate() +
-          (Math.max(row.firstWeek, row.lastWeek || row.firstWeek) - 1) * 7 +
-          6
-      );
+      const endOffset =
+        row.lastWeek > 0 ? Math.max(startOffset, row.lastWeek - baseWeek) : startOffset;
+      end.setDate(end.getDate() + endOffset * 7 + 6);
       const iso = (date: Date) => format(date, 'yyyy-MM-dd');
+      const endIso = row.lastWeek > 0 ? (iso(end) < row.endDate ? iso(end) : row.endDate) : row.endDate;
       lines.push(
         [
           row.name,
@@ -783,7 +775,7 @@ export default function SchedulePage() {
           row.endTime,
           row.room,
           iso(start),
-          iso(end) < row.endDate ? iso(end) : row.endDate,
+          endIso,
         ]
           .map(csvEscape)
           .join(',')
