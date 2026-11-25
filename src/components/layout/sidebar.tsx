@@ -12,6 +12,7 @@ import {
   StickyNote,
   ClipboardList,
   FileText,
+  Calculator,
   Settings,
   Sun,
   Moon,
@@ -38,6 +39,7 @@ const navItems = [
   { href: '/notes', label: 'Ghi chú', icon: StickyNote },
   { href: '/assignments', label: 'Bài tập', icon: ClipboardList },
   { href: '/exams', label: 'Lịch thi', icon: FileText },
+  { href: '/gpa', label: 'Tính GPA', icon: Calculator },
   { href: '/settings', label: 'Cài đặt', icon: Settings },
 ] as const;
 

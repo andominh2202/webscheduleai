@@ -15,6 +15,7 @@ import {
   Edit,
   GraduationCap,
   History,
+  Image as ImageIcon,
   MapPin,
   Plus,
   RefreshCw,
@@ -52,9 +53,9 @@ const ExamFormDialog = dynamic(
   { ssr: false }
 );
 
-const ExamImageImportDialog = dynamic(
+const ExamOcrDialog = dynamic(
   () =>
-    import('@/components/exams/exam-image-import-dialog').then((m) => m.ExamImageImportDialog),
+    import('@/components/exams/exam-ocr-dialog').then((m) => m.ExamOcrDialog),
   { ssr: false }
 );
 
@@ -106,7 +107,7 @@ function ExamsPageContent() {
   const [error, setError] = React.useState<string | null>(null);
 
   const [dialogOpen, setDialogOpen] = React.useState(false);
-  const [imageImportOpen, setImageImportOpen] = React.useState(false);
+  const [ocrDialogOpen, setOcrDialogOpen] = React.useState(false);
   const [editingExam, setEditingExam] = React.useState<ExamItem | null>(null);
 
   const [deletingExam, setDeletingExam] = React.useState<ExamItem | null>(null);
@@ -411,14 +412,13 @@ function ExamsPageContent() {
             Theo dõi ngày thi, ca thi, phòng thi và các quy định phòng thi quan trọng.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <Button
-            type="button"
             variant="outline"
-            onClick={() => setImageImportOpen(true)}
+            onClick={() => setOcrDialogOpen(true)}
             className="gap-2"
           >
-            <ImagePlus className="h-4 w-4" />
+            <ImageIcon className="h-4 w-4" />
             Nhập từ ảnh
           </Button>
           <Button
@@ -656,9 +656,9 @@ function ExamsPageContent() {
         </div>
       )}
 
-      <ExamImageImportDialog
-        open={imageImportOpen}
-        onOpenChange={setImageImportOpen}
+      <ExamOcrDialog
+        open={ocrDialogOpen}
+        onOpenChange={setOcrDialogOpen}
         courses={courses}
         onSaved={() => {
           invalidateCache('/api/exams');
@@ -679,6 +679,20 @@ function ExamsPageContent() {
           fetchData();
         }}
       />
+
+      {/* OCR Import Exam Dialog */}
+      {ocrDialogOpen && (
+        <ExamOcrDialog
+          open={ocrDialogOpen}
+          onOpenChange={setOcrDialogOpen}
+          courses={courses}
+          onSaved={() => {
+            invalidateCache('/api/exams');
+            invalidateCache('/api/dashboard');
+            fetchData();
+          }}
+        />
+      )}
 
       {/* Delete Confirmation */}
       <Dialog

@@ -9,6 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "test:import": "tsx scripts/verify-import-logic.ts",
+    "test:gpa": "tsx scripts/verify-gpa-logic.ts",
+    "test:validation": "tsx scripts/verify-validation-logic.ts",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",

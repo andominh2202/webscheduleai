@@ -4,10 +4,12 @@ import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import {
+  AlertTriangle,
   CalendarDays,
   CalendarPlus,
   CalendarRange,
   ChevronDown,
+  ClipboardPaste,
   Download,
   FileSpreadsheet,
   Filter,
@@ -17,6 +19,7 @@ import {
   List,
   Printer,
   RefreshCw,
+  Trash2,
   Upload,
 } from 'lucide-react';
 import {
@@ -45,6 +48,14 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/components/ui/toast';
 import { dedupeRequest, getCached, invalidateCache, setCached } from '@/lib/client-cache';
+import {
+  formatIsoToVnDate,
+  isValidDateRange,
+  isValidIsoDate,
+  isValidTime24,
+  isValidTimeRange,
+  parseDateToIso,
+} from '@/lib/date-time-validation';
 import { cn, SESSION_STATUS_LABELS } from '@/lib/utils';
 import { WeekViewSkeleton, type WeekViewSession } from '@/components/schedule/week-view';
 import {
@@ -103,6 +114,7 @@ interface RecognizedImageRow {
   lastWeek: number;
   startTime: string;
   endTime: string;
+  needsSchedule?: boolean;
 }
 
 const DEFAULT_CLASS_PERIODS: Record<number, ClassPeriod> = {
@@ -112,7 +124,17 @@ const DEFAULT_CLASS_PERIODS: Record<number, ClassPeriod> = {
   4: { start: '15:35', end: '18:00' },
 };
 const CLASS_PERIODS_STORAGE_KEY = 'webschedule-class-periods-v1';
-const validClock = (value: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+
+const DAY_OF_WEEK_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: -1, label: '-- Chọn thứ --' },
+  { value: 1, label: 'Thứ 2' },
+  { value: 2, label: 'Thứ 3' },
+  { value: 3, label: 'Thứ 4' },
+  { value: 4, label: 'Thứ 5' },
+  { value: 5, label: 'Thứ 6' },
+  { value: 6, label: 'Thứ 7' },
+  { value: 0, label: 'Chủ nhật' },
+];
 
 function applyPeriod<T extends { ca: number; startTime: string; endTime: string }>(
   row: T,
@@ -224,49 +246,44 @@ function exportWeekScheduleToPng(sessions: ScheduleSession[], startDate?: Date) 
 function VietnameseDateInput({
   value,
   onChange,
+  invalid,
 }: {
   value: string;
   onChange: (value: string) => void;
+  invalid?: boolean;
 }) {
-  const display = (iso: string) =>
-    /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso.split('-').reverse().join('/') : iso;
-  const [draft, setDraft] = useState(() => display(value));
+  const [draft, setDraft] = useState(() => formatIsoToVnDate(value));
   useEffect(() => {
-    setDraft(display(value));
+    setDraft(formatIsoToVnDate(value));
   }, [value]);
 
   const commit = () => {
-    const match = draft.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (!match) {
-      setDraft(display(value));
-      toast.error('Ngày phải có dạng DD/MM/YYYY');
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      onChange('');
+      setDraft('');
       return;
     }
-    const day = Number(match[1]);
-    const month = Number(match[2]);
-    const year = Number(match[3]);
-    const parsed = new Date(Date.UTC(year, month - 1, day));
-    if (
-      parsed.getUTCFullYear() !== year ||
-      parsed.getUTCMonth() !== month - 1 ||
-      parsed.getUTCDate() !== day
-    ) {
-      setDraft(display(value));
-      toast.error('Ngày không hợp lệ');
+    const iso = parseDateToIso(trimmed);
+    if (!iso) {
+      setDraft(formatIsoToVnDate(value));
+      toast.error('Ngày không hợp lệ. Vui lòng nhập theo định dạng dd/MM/yyyy.');
       return;
     }
-    const iso = `${match[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     onChange(iso);
-    setDraft(display(iso));
+    setDraft(formatIsoToVnDate(iso));
   };
 
   return (
     <input
       type="text"
       inputMode="numeric"
-      placeholder="DD/MM/YYYY"
-      aria-label="Ngày (ngày/tháng/năm)"
-      className="mt-1 w-full rounded-md border bg-background p-2 text-sm"
+      placeholder="dd/MM/yyyy"
+      aria-label="Ngày (dd/MM/yyyy)"
+      className={cn(
+        'mt-1 w-full rounded-md border bg-background p-2 text-sm',
+        invalid && 'border-amber-500 focus-visible:ring-amber-500'
+      )}
       value={draft}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={commit}
@@ -306,6 +323,10 @@ export default function SchedulePage() {
   const [importResult, setImportResult] = useState<string>('');
   const [imageRows, setImageRows] = useState<RecognizedImageRow[]>([]);
   const [imageBusy, setImageBusy] = useState(false);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [imageFileName, setImageFileName] = useState<string>('');
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [classPeriods, setClassPeriods] = useState<Record<number, ClassPeriod>>(
     DEFAULT_CLASS_PERIODS
   );
@@ -321,9 +342,9 @@ export default function SchedulePage() {
         const period = parsed[String(ca)];
         if (
           period &&
-          validClock(period.start) &&
-          validClock(period.end) &&
-          period.start < period.end
+          isValidTime24(period.start) &&
+          isValidTime24(period.end) &&
+          isValidTimeRange(period.start, period.end)
         ) {
           merged[ca] = period;
         }
@@ -351,12 +372,12 @@ export default function SchedulePage() {
     if (
       Object.values(classPeriods).some(
         (period) =>
-          !validClock(period.start) ||
-          !validClock(period.end) ||
-          period.start >= period.end
+          !isValidTime24(period.start) ||
+          !isValidTime24(period.end) ||
+          !isValidTimeRange(period.start, period.end)
       )
     ) {
-      toast.error('Giờ bắt đầu phải trước giờ kết thúc và đúng định dạng.');
+      toast.error('Giờ bắt đầu phải trước giờ kết thúc và đúng định dạng HH:mm.');
       return;
     }
     window.localStorage.setItem(CLASS_PERIODS_STORAGE_KEY, JSON.stringify(classPeriods));
@@ -539,63 +560,152 @@ export default function SchedulePage() {
     [handleRefresh]
   );
 
-  const handleImageRecognize = async (file: File) => {
-    setImageBusy(true);
+  const clearImageSelection = useCallback(() => {
+    setImagePreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setImageFileName('');
     setImageRows([]);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const res = await fetch('/api/import/image', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Không thể đọc ảnh');
-      setImageRows(
-        (data.rows || []).map((row: RecognizedImageRow) =>
-          applyPeriod(row, classPeriods)
-        )
-      );
-      toast.success(
-        `Đã nhận diện ${data.rows?.length || 0} học phần. Hãy kiểm tra trước khi lưu.`
-      );
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Nhận diện ảnh thất bại');
-    } finally {
-      setImageBusy(false);
-    }
-  };
+    if (imageInputRef.current) imageInputRef.current.value = '';
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    };
+  }, [imagePreviewUrl]);
+
+  const handleImageRecognize = useCallback(
+    async (file: File) => {
+      if (!file.type.startsWith('image/')) {
+        toast.error('Vui lòng chọn hoặc dán tệp ảnh (PNG, JPEG, WebP).');
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('Ảnh vượt quá 5 MB. Hãy chọn ảnh dung lượng nhỏ hơn.');
+        return;
+      }
+      setImagePreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(file);
+      });
+      setImageFileName(file.name || 'anh-dan-tu-clipboard.png');
+      setImageBusy(true);
+      setImageRows([]);
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('mode', 'schedule');
+        const res = await fetch('/api/import/image', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Không thể đọc ảnh');
+        const nextRows: RecognizedImageRow[] = (data.rows || []).map(
+          (row: RecognizedImageRow) => applyPeriod(row, classPeriods)
+        );
+        setImageRows(nextRows);
+        const missingCount = nextRows.filter(
+          (r) => r.dayOfWeek < 0 || !isValidTime24(r.startTime) || !isValidTime24(r.endTime)
+        ).length;
+        if (missingCount > 0) {
+          toast.warning(
+            `Đã nhận diện ${nextRows.length} học phần, trong đó ${missingCount} dòng thiếu Thứ hoặc Giờ học. Hãy bổ sung bên dưới trước khi lưu.`
+          );
+        } else {
+          toast.success(
+            `Đã nhận diện ${nextRows.length} học phần. Hãy kiểm tra trước khi lưu.`
+          );
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Nhận diện ảnh thất bại');
+      } finally {
+        setImageBusy(false);
+      }
+    },
+    [classPeriods]
+  );
+
+  useEffect(() => {
+    if (!importOpen) return;
+    const handleWindowPaste = (event: ClipboardEvent) => {
+      if (imageBusy) return;
+      const items = event.clipboardData?.items;
+      if (!items) return;
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          const pastedFile = item.getAsFile();
+          if (pastedFile) {
+            event.preventDefault();
+            void handleImageRecognize(pastedFile);
+            return;
+          }
+        }
+      }
+    };
+    window.addEventListener('paste', handleWindowPaste);
+    return () => window.removeEventListener('paste', handleWindowPaste);
+  }, [importOpen, imageBusy, handleImageRecognize]);
 
   const updateImageRow = (index: number, key: string, value: string) => {
     setImageRows((previous) =>
-      previous.map((row, i) =>
-        i === index
-          ? key === 'ca'
-            ? applyPeriod({ ...row, ca: Number(value) }, classPeriods)
-            : {
-                ...row,
-                [key]: ['credits', 'dayOfWeek', 'firstWeek', 'lastWeek'].includes(key)
-                  ? Number(value)
-                  : value,
-              }
-          : row
-      )
+      previous.map((row, i) => {
+        if (i !== index) return row;
+        if (key === 'ca') {
+          const next = applyPeriod({ ...row, ca: Number(value) }, classPeriods);
+          return {
+            ...next,
+            needsSchedule:
+              next.dayOfWeek < 0 ||
+              !isValidTime24(next.startTime) ||
+              !isValidTime24(next.endTime),
+          };
+        }
+        const updated = {
+          ...row,
+          [key]: ['credits', 'dayOfWeek', 'firstWeek', 'lastWeek'].includes(key)
+            ? Number(value)
+            : value,
+        };
+        return {
+          ...updated,
+          needsSchedule:
+            updated.dayOfWeek < 0 ||
+            !isValidTime24(updated.startTime) ||
+            !isValidTime24(updated.endTime),
+        };
+      })
     );
   };
 
+  const getRowValidationError = (row: RecognizedImageRow): string | null => {
+    if (!row.name.trim()) return 'Thiếu tên môn học';
+    if (!row.courseCode.trim()) return 'Thiếu mã học phần';
+    if (!Number.isInteger(row.dayOfWeek) || row.dayOfWeek < 0 || row.dayOfWeek > 6) {
+      return 'Chưa chọn Thứ học';
+    }
+    if (!isValidTime24(row.startTime) || !isValidTime24(row.endTime)) {
+      return 'Giờ học phải đúng định dạng HH:mm';
+    }
+    if (!isValidTimeRange(row.startTime, row.endTime)) {
+      return 'Giờ kết thúc phải sau giờ bắt đầu';
+    }
+    if (!isValidIsoDate(row.startDate) || !isValidIsoDate(row.endDate)) {
+      return 'Ngày bắt đầu / kết thúc phải đúng dd/MM/yyyy';
+    }
+    if (!isValidDateRange(row.startDate, row.endDate)) {
+      return 'Ngày kết thúc phải sau hoặc bằng ngày bắt đầu';
+    }
+    return null;
+  };
+
   const saveImageRows = async () => {
-    if (
-      !imageRows.length ||
-      imageRows.some(
-        (row) =>
-          !row.name ||
-          !row.courseCode ||
-          !row.startTime ||
-          !row.endTime ||
-          row.startTime >= row.endTime ||
-          !/^\d{4}-\d{2}-\d{2}$/.test(row.startDate) ||
-          !/^\d{4}-\d{2}-\d{2}$/.test(row.endDate)
-      )
-    ) {
-      toast.error('Kiểm tra tên môn, mã học phần, ngày và giờ học của tất cả dòng.');
-      return;
+    if (!imageRows.length) return;
+    for (let i = 0; i < imageRows.length; i++) {
+      const err = getRowValidationError(imageRows[i]);
+      if (err) {
+        toast.error(`Học phần ${i + 1}: ${err}.`);
+        return;
+      }
     }
     const headers = [
       'Tên môn học',
@@ -653,7 +763,7 @@ export default function SchedulePage() {
         `Đã lưu ${data.createdCourses} môn, ${data.createdSchedules} lịch. ${(data.warnings || []).join('; ')}`
       );
       toast.success('Đã lưu thời khóa biểu từ ảnh');
-      setImageRows([]);
+      clearImageSelection();
       handleRefresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Không thể lưu lịch');
@@ -951,51 +1061,108 @@ export default function SchedulePage() {
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-2.5 rounded-xl border bg-muted/20 p-3">
-              <p className="text-sm font-semibold">
-                1. Nhận diện từ ảnh chụp TKB (PNG / JPEG / WebP)
-              </p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold">
+                  1. Nhận diện từ ảnh chụp TKB (PNG / JPEG / WebP)
+                </p>
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                  <ClipboardPaste className="h-3 w-3" />
+                  Hỗ trợ Ctrl+V
+                </span>
+              </div>
+
               <div
-                tabIndex={0}
-                role="group"
-                aria-label="Khu vực nhập ảnh thời khóa biểu"
-                className="space-y-2 rounded-lg border border-dashed border-primary/40 bg-background p-3 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
                 onDragOver={(event) => {
                   event.preventDefault();
-                  event.dataTransfer.dropEffect = 'copy';
+                  setIsDraggingImage(true);
                 }}
+                onDragLeave={() => setIsDraggingImage(false)}
                 onDrop={(event) => {
                   event.preventDefault();
-                  const file = Array.from(event.dataTransfer.files).find((item) =>
-                    ['image/png', 'image/jpeg', 'image/webp'].includes(item.type)
-                  );
-                  if (file && !imageBusy) void handleImageRecognize(file);
-                  else if (!file) toast.error('Hãy thả ảnh PNG, JPEG hoặc WebP vào đây.');
+                  setIsDraggingImage(false);
+                  if (imageBusy) return;
+                  const dropped = event.dataTransfer.files?.[0];
+                  if (dropped) void handleImageRecognize(dropped);
                 }}
-                onPaste={(event) => {
-                  const file = Array.from(event.clipboardData.files).find((item) =>
-                    ['image/png', 'image/jpeg', 'image/webp'].includes(item.type)
-                  );
-                  if (!file) return;
-                  event.preventDefault();
-                  if (!imageBusy) void handleImageRecognize(file);
-                }}
+                className={cn(
+                  'rounded-lg border-2 border-dashed p-3 text-center transition-colors',
+                  isDraggingImage
+                    ? 'border-primary bg-primary/5'
+                    : 'border-muted-foreground/25 bg-background/80 hover:border-primary/50'
+                )}
               >
-                <p className="text-xs font-medium">Chọn ảnh, kéo thả hoặc dán ảnh bằng Ctrl + V</p>
                 <input
+                  ref={imageInputRef}
                   type="file"
                   accept="image/png,image/jpeg,image/webp"
                   aria-label="Chọn ảnh thời khóa biểu"
-                  className="block w-full text-xs sm:text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary hover:file:bg-primary/20"
+                  className="hidden"
                   disabled={imageBusy}
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     if (file) void handleImageRecognize(file);
-                    event.currentTarget.value = '';
                   }}
                 />
-                <p className="text-[11px] text-muted-foreground">
-                  Có thể copy ảnh từ trình duyệt hoặc công cụ chụp màn hình, sau đó bấm vào khu vực này và nhấn Ctrl + V.
-                </p>
+                {imagePreviewUrl ? (
+                  <div className="space-y-2">
+                    <div className="relative mx-auto max-h-40 overflow-hidden rounded-md border bg-muted/30">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={imagePreviewUrl}
+                        alt="Ảnh thời khóa biểu đã chọn"
+                        className="mx-auto max-h-40 w-auto object-contain"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="truncate text-muted-foreground">{imageFileName}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          disabled={imageBusy}
+                          onClick={() => imageInputRef.current?.click()}
+                        >
+                          Đổi ảnh
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                          disabled={imageBusy}
+                          onClick={clearImageSelection}
+                        >
+                          <Trash2 className="mr-1 h-3.5 w-3.5" />
+                          Xóa ảnh
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-2 py-2">
+                    <ImageIcon className="h-7 w-7 text-muted-foreground" />
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-medium">
+                        Dán ảnh trực tiếp bằng <kbd className="rounded border bg-muted px-1 py-0.5 text-[11px]">Ctrl+V</kbd>, kéo thả vào đây hoặc chọn tệp
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Hỗ trợ cả bảng TKB đầy đủ và bảng danh sách đăng ký học phần (PNG/JPEG/WebP &lt; 5MB)
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                      disabled={imageBusy}
+                      onClick={() => imageInputRef.current?.click()}
+                    >
+                      Chọn ảnh từ máy
+                    </Button>
+                  </div>
+                )}
               </div>
               <div className="space-y-2 rounded-lg border bg-background p-2.5">
                 <div className="flex items-center justify-between gap-2">
@@ -1070,86 +1237,199 @@ export default function SchedulePage() {
 
               {imageRows.length > 0 && (
                 <div className="max-h-[45vh] space-y-3 overflow-y-auto pr-1">
+                  {imageRows.some((r) => Boolean(getRowValidationError(r))) && (
+                    <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50/80 p-2.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                      <span>
+                        Một số dòng chưa có Thứ hoặc Giờ học (hoặc ngày/giờ chưa đúng định dạng). Hãy bổ sung trực tiếp trên từng dòng trước khi lưu.
+                      </span>
+                    </div>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     Kiểm tra và chỉnh sửa thông tin từng học phần trước khi lưu:
                   </p>
-                  {imageRows.map((row, index) => (
-                    <div
-                      key={index}
-                      className="space-y-2 rounded-lg border bg-background p-2.5"
-                    >
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold">Học phần {index + 1}</p>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs text-destructive hover:text-destructive"
-                          onClick={() =>
-                            setImageRows((previous) =>
-                              previous.filter((_, i) => i !== index)
-                            )
-                          }
-                        >
-                          Bỏ dòng này
-                        </Button>
-                      </div>
-                      {(
-                        [
-                          'name',
-                          'courseCode',
-                          'room',
-                          'startDate',
-                          'endDate',
-                          'startTime',
-                          'endTime',
-                        ] as const
-                      ).map((key) => (
-                        <label key={key} className="block text-xs">
-                          {
-                            {
-                              name: 'Tên môn',
-                              courseCode: 'Mã học phần',
-                              room: 'Phòng',
-                              startDate: 'Ngày bắt đầu',
-                              endDate: 'Ngày kết thúc',
-                              startTime: 'Giờ bắt đầu (HH:mm)',
-                              endTime: 'Giờ kết thúc (HH:mm)',
-                            }[key]
-                          }
-                          {key.includes('Date') ? (
-                            <VietnameseDateInput
-                              value={row[key]}
-                              onChange={(value) => updateImageRow(index, key, value)}
-                            />
-                          ) : (
+                  {imageRows.map((row, index) => {
+                    const rowError = getRowValidationError(row);
+                    return (
+                      <div
+                        key={index}
+                        className={cn(
+                          'space-y-2 rounded-lg border bg-background p-2.5',
+                          rowError && 'border-amber-400/80 bg-amber-50/20 dark:bg-amber-950/10'
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <p className="text-sm font-semibold">Học phần {index + 1}</p>
+                            {rowError && (
+                              <span className="truncate rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                                {rowError}
+                              </span>
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-destructive hover:text-destructive shrink-0"
+                            onClick={() =>
+                              setImageRows((previous) =>
+                                previous.filter((_, i) => i !== index)
+                              )
+                            }
+                          >
+                            Bỏ dòng này
+                          </Button>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <label className="block text-xs">
+                            Tên môn
                             <input
                               className="mt-1 w-full rounded-md border bg-background p-2 text-sm"
                               type="text"
-                              placeholder={
-                                key.includes('Time') ? 'HH:mm (24 giờ)' : undefined
-                              }
-                              value={row[key]}
+                              value={row.name}
                               onChange={(event) =>
-                                updateImageRow(index, key, event.target.value)
+                                updateImageRow(index, 'name', event.target.value)
                               }
                             />
-                          )}
-                        </label>
-                      ))}
-                      <div className="grid grid-cols-4 gap-2">
-                        {(['dayOfWeek', 'ca', 'firstWeek', 'lastWeek'] as const).map(
-                          (key) => (
+                          </label>
+                          <label className="block text-xs">
+                            Mã học phần
+                            <input
+                              className="mt-1 w-full rounded-md border bg-background p-2 text-sm"
+                              type="text"
+                              value={row.courseCode}
+                              onChange={(event) =>
+                                updateImageRow(index, 'courseCode', event.target.value)
+                              }
+                            />
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          <label className="block text-xs">
+                            Thứ học
+                            <select
+                              aria-label={`Thứ học phần ${index + 1}`}
+                              className={cn(
+                                'mt-1 w-full rounded-md border bg-background p-2 text-sm',
+                                row.dayOfWeek < 0 && 'border-amber-500'
+                              )}
+                              value={row.dayOfWeek}
+                              onChange={(event) =>
+                                updateImageRow(index, 'dayOfWeek', event.target.value)
+                              }
+                            >
+                              {DAY_OF_WEEK_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="block text-xs">
+                            Ca học
+                            <select
+                              aria-label={`Ca học phần ${index + 1}`}
+                              className="mt-1 w-full rounded-md border bg-background p-2 text-sm"
+                              value={row.ca}
+                              onChange={(event) =>
+                                updateImageRow(index, 'ca', event.target.value)
+                              }
+                            >
+                              <option value={0}>-- Tự nhập giờ --</option>
+                              {[1, 2, 3, 4].map((ca) => (
+                                <option key={ca} value={ca}>
+                                  Ca {ca} ({classPeriods[ca].start}–{classPeriods[ca].end})
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="block text-xs col-span-2 sm:col-span-1">
+                            Phòng
+                            <input
+                              className="mt-1 w-full rounded-md border bg-background p-2 text-sm"
+                              type="text"
+                              value={row.room}
+                              onChange={(event) =>
+                                updateImageRow(index, 'room', event.target.value)
+                              }
+                            />
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="block text-xs">
+                            Giờ bắt đầu (HH:mm)
+                            <input
+                              className={cn(
+                                'mt-1 w-full rounded-md border bg-background p-2 text-sm',
+                                !isValidTime24(row.startTime) && 'border-amber-500'
+                              )}
+                              type="text"
+                              placeholder="07:00"
+                              value={row.startTime}
+                              onChange={(event) =>
+                                updateImageRow(index, 'startTime', event.target.value)
+                              }
+                            />
+                          </label>
+                          <label className="block text-xs">
+                            Giờ kết thúc (HH:mm)
+                            <input
+                              className={cn(
+                                'mt-1 w-full rounded-md border bg-background p-2 text-sm',
+                                (!isValidTime24(row.endTime) ||
+                                  (isValidTime24(row.startTime) &&
+                                    !isValidTimeRange(row.startTime, row.endTime))) &&
+                                  'border-amber-500'
+                              )}
+                              type="text"
+                              placeholder="09:25"
+                              value={row.endTime}
+                              onChange={(event) =>
+                                updateImageRow(index, 'endTime', event.target.value)
+                              }
+                            />
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="block text-xs">
+                            Ngày bắt đầu (dd/MM/yyyy)
+                            <VietnameseDateInput
+                              value={row.startDate}
+                              invalid={!isValidIsoDate(row.startDate)}
+                              onChange={(value) => updateImageRow(index, 'startDate', value)}
+                            />
+                          </label>
+                          <label className="block text-xs">
+                            Ngày kết thúc (dd/MM/yyyy)
+                            <VietnameseDateInput
+                              value={row.endDate}
+                              invalid={
+                                !isValidIsoDate(row.endDate) ||
+                                (isValidIsoDate(row.startDate) &&
+                                  !isValidDateRange(row.startDate, row.endDate))
+                              }
+                              onChange={(value) => updateImageRow(index, 'endDate', value)}
+                            />
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2">
+                          {(['credits', 'firstWeek', 'lastWeek'] as const).map((key) => (
                             <label key={key} className="text-xs">
                               {
                                 {
-                                  dayOfWeek: 'Thứ (1=T2)',
-                                  ca: 'Ca',
+                                  credits: 'Tín chỉ',
                                   firstWeek: 'Tuần đầu',
                                   lastWeek: 'Tuần cuối',
                                 }[key]
                               }
                               <input
                                 type="number"
+                                min={0}
                                 className="mt-1 w-full rounded-md border bg-background p-1.5 text-sm"
                                 value={row[key]}
                                 onChange={(event) =>
@@ -1157,13 +1437,16 @@ export default function SchedulePage() {
                                 }
                               />
                             </label>
-                          )
-                        )}
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <Button
-                    disabled={importBusy}
+                    disabled={
+                      importBusy ||
+                      imageRows.some((row) => Boolean(getRowValidationError(row)))
+                    }
                     onClick={saveImageRows}
                     className="w-full"
                   >
