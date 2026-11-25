@@ -1052,7 +1052,12 @@ export default function SchedulePage() {
 
       {/* Import Schedule Dialog */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          className={cn(
+            'max-h-[92vh] overflow-y-auto transition-[max-width] duration-200',
+            imageRows.length > 0 ? 'w-[95vw] max-w-5xl' : 'max-w-lg'
+          )}
+        >
           <DialogHeader>
             <DialogTitle>Nhập thời khóa biểu</DialogTitle>
             <DialogDescription>
@@ -1236,7 +1241,7 @@ export default function SchedulePage() {
               )}
 
               {imageRows.length > 0 && (
-                <div className="max-h-[45vh] space-y-3 overflow-y-auto pr-1">
+                <div className="space-y-3">
                   {imageRows.some((r) => Boolean(getRowValidationError(r))) && (
                     <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50/80 p-2.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
@@ -1246,8 +1251,10 @@ export default function SchedulePage() {
                     </div>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    Kiểm tra và chỉnh sửa thông tin từng học phần trước khi lưu:
+                    Đã nhận diện <strong>{imageRows.length}</strong> học phần. Kiểm tra và chỉnh sửa thông tin trước khi lưu:
                   </p>
+                  <div className="max-h-[60vh] overflow-y-auto pr-1">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   {imageRows.map((row, index) => {
                     const rowError = getRowValidationError(row);
                     return (
@@ -1442,6 +1449,8 @@ export default function SchedulePage() {
                       </div>
                     );
                   })}
+                    </div>
+                  </div>
                   <Button
                     disabled={
                       importBusy ||
