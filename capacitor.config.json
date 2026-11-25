@@ -1,0 +1,17 @@
+{
+  "appId": "com.webschedule.app",
+  "appName": "WebSchedule",
+  "webDir": "mobile-www",
+  "server": {
+    "url": "https://webscheduleai.vercel.app",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#f8fafc"
+  },
+  "ios": {
+    "contentInset": "automatic",
+    "backgroundColor": "#f8fafc"
+  }
+}
