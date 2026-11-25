@@ -10,6 +10,7 @@ import { vi } from 'date-fns/locale';
 import {
   AlertCircle,
   Calendar,
+  ImagePlus,
   Clock,
   Edit,
   GraduationCap,
@@ -48,6 +49,12 @@ import type { ExamCourseOption, ExamItem } from '@/components/exams/exam-form-di
 const ExamFormDialog = dynamic(
   () =>
     import('@/components/exams/exam-form-dialog').then((m) => m.ExamFormDialog),
+  { ssr: false }
+);
+
+const ExamImageImportDialog = dynamic(
+  () =>
+    import('@/components/exams/exam-image-import-dialog').then((m) => m.ExamImageImportDialog),
   { ssr: false }
 );
 
@@ -99,6 +106,7 @@ function ExamsPageContent() {
   const [error, setError] = React.useState<string | null>(null);
 
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [imageImportOpen, setImageImportOpen] = React.useState(false);
   const [editingExam, setEditingExam] = React.useState<ExamItem | null>(null);
 
   const [deletingExam, setDeletingExam] = React.useState<ExamItem | null>(null);
@@ -403,16 +411,27 @@ function ExamsPageContent() {
             Theo dõi ngày thi, ca thi, phòng thi và các quy định phòng thi quan trọng.
           </p>
         </div>
-        <Button
-          onClick={() => {
-            setEditingExam(null);
-            setDialogOpen(true);
-          }}
-          className="gap-2 self-start sm:self-auto"
-        >
-          <Plus className="h-4 w-4" />
-          Thêm lịch thi
-        </Button>
+        <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setImageImportOpen(true)}
+            className="gap-2"
+          >
+            <ImagePlus className="h-4 w-4" />
+            Nhập từ ảnh
+          </Button>
+          <Button
+            onClick={() => {
+              setEditingExam(null);
+              setDialogOpen(true);
+            }}
+            className="gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            Thêm lịch thi
+          </Button>
+        </div>
       </div>
 
       {/* Course missing banner */}
@@ -636,6 +655,17 @@ function ExamsPageContent() {
           )}
         </div>
       )}
+
+      <ExamImageImportDialog
+        open={imageImportOpen}
+        onOpenChange={setImageImportOpen}
+        courses={courses}
+        onSaved={() => {
+          invalidateCache('/api/exams');
+          invalidateCache('/api/dashboard');
+          fetchData();
+        }}
+      />
 
       {/* Add / Edit Dialog */}
       <ExamFormDialog

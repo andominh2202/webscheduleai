@@ -954,17 +954,49 @@ export default function SchedulePage() {
               <p className="text-sm font-semibold">
                 1. Nhận diện từ ảnh chụp TKB (PNG / JPEG / WebP)
               </p>
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                aria-label="Chọn ảnh thời khóa biểu"
-                className="block w-full text-xs sm:text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary hover:file:bg-primary/20"
-                disabled={imageBusy}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void handleImageRecognize(file);
+              <div
+                tabIndex={0}
+                role="group"
+                aria-label="Khu vực nhập ảnh thời khóa biểu"
+                className="space-y-2 rounded-lg border border-dashed border-primary/40 bg-background p-3 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'copy';
                 }}
-              />
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const file = Array.from(event.dataTransfer.files).find((item) =>
+                    ['image/png', 'image/jpeg', 'image/webp'].includes(item.type)
+                  );
+                  if (file && !imageBusy) void handleImageRecognize(file);
+                  else if (!file) toast.error('Hãy thả ảnh PNG, JPEG hoặc WebP vào đây.');
+                }}
+                onPaste={(event) => {
+                  const file = Array.from(event.clipboardData.files).find((item) =>
+                    ['image/png', 'image/jpeg', 'image/webp'].includes(item.type)
+                  );
+                  if (!file) return;
+                  event.preventDefault();
+                  if (!imageBusy) void handleImageRecognize(file);
+                }}
+              >
+                <p className="text-xs font-medium">Chọn ảnh, kéo thả hoặc dán ảnh bằng Ctrl + V</p>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  aria-label="Chọn ảnh thời khóa biểu"
+                  className="block w-full text-xs sm:text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary hover:file:bg-primary/20"
+                  disabled={imageBusy}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void handleImageRecognize(file);
+                    event.currentTarget.value = '';
+                  }}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Có thể copy ảnh từ trình duyệt hoặc công cụ chụp màn hình, sau đó bấm vào khu vực này và nhấn Ctrl + V.
+                </p>
+              </div>
               <div className="space-y-2 rounded-lg border bg-background p-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs font-semibold">
