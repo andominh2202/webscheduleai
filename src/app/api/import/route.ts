@@ -221,8 +221,8 @@ export async function POST(req: NextRequest) {
         };
       },
       {
-        maxWait: 5000,
-        timeout: 15000,
+        maxWait: 10000,
+        timeout: 45000,
       }
     );
 
