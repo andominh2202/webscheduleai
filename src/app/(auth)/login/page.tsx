@@ -15,6 +15,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BrandLogo } from '@/components/ui/brand-logo';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -165,9 +166,7 @@ export default function LoginPage() {
           {/* Left brand panel on desktop */}
           <div className="hidden lg:flex lg:col-span-6 flex-col space-y-6 pr-4">
             <div className="inline-flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-primary text-primary-foreground flex items-center justify-center shadow-soft">
-                <Calendar className="w-6 h-6" />
-              </div>
+              <BrandLogo size={44} className="w-11 h-11" />
               <div>
                 <p className="text-xl font-bold tracking-tight text-foreground">WebSchedule</p>
                 <p className="text-xs text-muted-foreground">Trợ lý quản lý lịch học cá nhân</p>

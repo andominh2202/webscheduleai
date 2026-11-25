@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { BrandLogo } from '@/components/ui/brand-logo';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -106,9 +107,7 @@ export const Sidebar = memo(function Sidebar({
             onClick={onMobileClose}
             className="flex items-center gap-3 min-w-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <div className="w-9 h-9 rounded-xl bg-primary text-primary-foreground flex items-center justify-center flex-shrink-0 shadow-soft">
-              <Calendar className="w-5 h-5" />
-            </div>
+            <BrandLogo size={36} className="w-9 h-9" />
             {!desktopCollapsed && (
               <div className="min-w-0">
                 <span className="block text-base font-bold tracking-tight text-foreground truncate">
