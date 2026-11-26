@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { BrandLogo } from '@/components/ui/brand-logo';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Card,
   CardContent,
@@ -35,6 +36,7 @@ export default function LoginPage() {
   // Login state
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -46,12 +48,17 @@ export default function LoginPage() {
   const [showRegPassword, setShowRegPassword] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
 
-  // Sync ?tab=register without requiring Suspense boundary around useSearchParams
+  // Sync ?tab=register and restore remembered email
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       if (params.get('tab') === 'register') {
         setTab('register');
+      }
+      const savedEmail = localStorage.getItem('__ws_remember_email');
+      if (savedEmail) {
+        setEmail(savedEmail);
+        setRememberMe(true);
       }
     } catch {
       // ignore
@@ -76,6 +83,15 @@ export default function LoginPage() {
       if (result?.error) {
         toast.error('Email chưa được đăng ký hoặc mật khẩu không đúng.');
       } else {
+        try {
+          if (rememberMe) {
+            localStorage.setItem('__ws_remember_email', email.trim());
+          } else {
+            localStorage.removeItem('__ws_remember_email');
+          }
+        } catch {
+          // ignore
+        }
         toast.success('Đăng nhập thành công!');
         router.push('/dashboard');
         router.refresh();
@@ -271,6 +287,19 @@ export default function LoginPage() {
                             )}
                           </button>
                         </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <label
+                          htmlFor="remember-me"
+                          className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground cursor-pointer select-none"
+                        >
+                          <Checkbox
+                            id="remember-me"
+                            checked={rememberMe}
+                            onCheckedChange={(checked) => setRememberMe(checked === true)}
+                          />
+                          <span>Ghi nhớ đăng nhập (30 ngày)</span>
+                        </label>
                       </div>
                       <Button type="submit" className="w-full" disabled={loading}>
                         {loading ? (
