@@ -311,40 +311,6 @@ export default function LoginPage() {
                           'Đăng nhập'
                         )}
                       </Button>
-
-                      <div className="pt-2 border-t border-border/70 space-y-2">
-                        <p className="text-xs text-center text-muted-foreground">
-                          Điền nhanh tài khoản trải nghiệm:
-                        </p>
-                        <div className="grid grid-cols-1 gap-1.5">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="w-full text-xs"
-                            disabled={loading}
-                            onClick={() => {
-                              setEmail('dominhan0612@gmail.com');
-                              setPassword('123456');
-                            }}
-                          >
-                            Đỗ Minh An (dominhan0612@gmail.com)
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="w-full text-xs text-muted-foreground"
-                            disabled={loading}
-                            onClick={() => {
-                              setEmail('student@webschedule.vn');
-                              setPassword('123456');
-                            }}
-                          >
-                            Tài khoản mẫu (student@webschedule.vn)
-                          </Button>
-                        </div>
-                      </div>
                     </form>
                   </TabsContent>
 
