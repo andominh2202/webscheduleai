@@ -18,6 +18,9 @@ function databaseUrl(): string | undefined {
     if (!url.searchParams.has('pool_timeout')) {
       url.searchParams.set('pool_timeout', '20');
     }
+    if (url.hostname.includes('pooler.supabase.com') && (!url.port || url.port === '5432')) {
+      url.port = '6543';
+    }
     if (
       (url.port === '6543' || url.hostname.includes('pooler.supabase.com')) &&
       !url.searchParams.has('pgbouncer')
