@@ -398,10 +398,10 @@ function ExamsPageContent() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b pb-5">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-2xl font-bold tracking-tight">Quản lý lịch thi</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Quản lý lịch thi</h1>
             {!loading && exams.length > 0 && (
               <Badge variant="secondary" className="text-xs font-medium tabular-nums">
                 {upcomingExams.length} sắp tới • {pastExams.length} đã qua
@@ -415,18 +415,20 @@ function ExamsPageContent() {
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <Button
             variant="outline"
+            size="sm"
             onClick={() => setOcrDialogOpen(true)}
-            className="gap-2"
+            className="gap-1.5"
           >
             <ImageIcon className="h-4 w-4" />
             Nhập từ ảnh
           </Button>
           <Button
+            size="sm"
             onClick={() => {
               setEditingExam(null);
               setDialogOpen(true);
             }}
-            className="gap-2"
+            className="gap-1.5"
           >
             <Plus className="h-4 w-4" />
             Thêm lịch thi

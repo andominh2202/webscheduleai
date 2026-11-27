@@ -52,6 +52,7 @@ export interface WeekViewSession {
     name: string;
     courseCode?: string | null;
     color: string;
+    instructor?: string | null;
   };
 }
 
@@ -434,9 +435,17 @@ export function WeekView({
     const isCancelled = props.status === 'cancelled';
     const isCompleted = props.status === 'completed';
     const palette = getCoursePalette(props.color);
+    const tooltipText = [
+      props.courseCode ? `[${props.courseCode}] ${props.courseName || eventInfo.event.title}` : (props.courseName || eventInfo.event.title),
+      `${props.startTime}–${props.endTime}`,
+      props.room ? `Phòng ${props.room}` : props.location,
+    ]
+      .filter(Boolean)
+      .join(' • ');
 
     return (
       <div
+        title={tooltipText}
         style={isCancelled ? undefined : palette.cssVars}
         className={cn(
           'group h-full w-full rounded-md border border-l-[3.5px] px-1.5 py-1 overflow-hidden flex flex-col justify-between leading-tight select-none transition-all',
@@ -864,6 +873,7 @@ export function WeekView({
             "[&_.fc-timegrid-now-indicator-line]:before:content-[''] [&_.fc-timegrid-now-indicator-line]:before:absolute [&_.fc-timegrid-now-indicator-line]:before:-left-1.5 [&_.fc-timegrid-now-indicator-line]:before:-top-[5px] [&_.fc-timegrid-now-indicator-line]:before:h-2.5 [&_.fc-timegrid-now-indicator-line]:before:w-2.5 [&_.fc-timegrid-now-indicator-line]:before:rounded-full [&_.fc-timegrid-now-indicator-line]:before:bg-rose-500 [&_.fc-timegrid-now-indicator-line]:before:ring-4 [&_.fc-timegrid-now-indicator-line]:before:ring-rose-500/25",
             '[&_.fc-timegrid-now-indicator-arrow]:border-rose-500',
             '[&_.fc-timegrid-event_.fc-event-main]:p-0.5',
+            '[&_.fc-timegrid-col.fc-day-today]:bg-primary/[0.025]',
             '[&_.fc-col-header-cell.fc-day-today]:bg-primary/10 [&_.fc-col-header-cell.fc-day-today_.fc-col-header-cell-cushion]:text-primary [&_.fc-col-header-cell.fc-day-today_.fc-col-header-cell-cushion]:font-bold',
             compact
               ? 'w-full min-w-0 [&_.fc-col-header-cell-cushion]:text-[11px] sm:[&_.fc-col-header-cell-cushion]:text-xs [&_.fc-timegrid-slot]:h-[1.75em]'

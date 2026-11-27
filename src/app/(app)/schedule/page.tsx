@@ -318,6 +318,7 @@ export default function SchedulePage() {
   const [makeupOpen, setMakeupOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [importModalTab, setImportModalTab] = useState<'ocr' | 'excel' | 'manual'>('ocr');
   const [importBusy, setImportBusy] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importResult, setImportResult] = useState<string>('');
@@ -1092,24 +1093,65 @@ export default function SchedulePage() {
           )}
         >
           <DialogHeader>
-            <DialogTitle>Nhập thời khóa biểu</DialogTitle>
+            <DialogTitle>Tạo &amp; Nhập thời khóa biểu</DialogTitle>
             <DialogDescription>
-              Nhập từ Excel (.xlsx, .xls), CSV hoặc nhận diện tự động từ ảnh chụp màn hình TKB.
+              Chọn phương thức phù hợp: nhận diện ảnh TKB (OCR), nhập tệp Excel/CSV hoặc thêm buổi học thủ công.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-2.5 rounded-xl border bg-muted/20 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold">
-                  1. Nhận diện từ ảnh chụp TKB (PNG / JPEG / WebP)
-                </p>
-                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
-                  <ClipboardPaste className="h-3 w-3" />
-                  Hỗ trợ Ctrl+V
-                </span>
-              </div>
+          <Tabs
+            value={importModalTab}
+            onValueChange={(value) => setImportModalTab(value as 'ocr' | 'excel' | 'manual')}
+            className="space-y-4"
+          >
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="ocr" className="gap-1.5 text-xs sm:text-sm">
+                <ImageIcon className="h-3.5 w-3.5 shrink-0" />
+                <span>Ảnh TKB (OCR)</span>
+              </TabsTrigger>
+              <TabsTrigger value="excel" className="gap-1.5 text-xs sm:text-sm">
+                <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />
+                <span>Excel / CSV</span>
+              </TabsTrigger>
+              <TabsTrigger value="manual" className="gap-1.5 text-xs sm:text-sm">
+                <CalendarPlus className="h-3.5 w-3.5 shrink-0" />
+                <span>Thêm buổi học</span>
+              </TabsTrigger>
+            </TabsList>
 
-              <div
+            {importModalTab === 'ocr' && (
+              <div className="space-y-3">
+                {/* Step indicator */}
+                <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/30 rounded-lg px-3 py-2 border">
+                  <span className={cn('font-semibold', imageRows.length === 0 ? 'text-primary' : 'text-emerald-600 dark:text-emerald-400')}>
+                    1. Tải ảnh TKB
+                  </span>
+                  <span>→</span>
+                  <span className={cn('font-semibold', imageRows.length > 0 ? 'text-primary' : '')}>
+                    2. Kiểm tra &amp; chỉnh sửa
+                  </span>
+                  <span>→</span>
+                  <span>3. Lưu lịch học</span>
+                </div>
+
+                <div className="space-y-2.5 rounded-xl border bg-muted/20 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold">
+                      Nhận diện từ ảnh chụp TKB (PNG / JPEG / WebP)
+                    </p>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                      <ClipboardPaste className="h-3 w-3" />
+                      Hỗ trợ Ctrl+V
+                    </span>
+                  </div>
+
+                  {imageBusy && (
+                    <div className="flex items-center gap-2.5 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-xs text-primary">
+                      <RefreshCw className="h-4 w-4 animate-spin shrink-0" />
+                      <span>Đang phân tích ảnh thời khóa biểu bằng AI OCR, vui lòng đợi...</span>
+                    </div>
+                  )}
+
+                  <div
                 onDragOver={(event) => {
                   event.preventDefault();
                   setIsDraggingImage(true);
@@ -1521,32 +1563,70 @@ export default function SchedulePage() {
                 </div>
               )}
             </div>
+              </div>
+            )}
 
-            <div className="space-y-2 rounded-xl border bg-muted/20 p-3">
-              <p className="text-sm font-semibold">
-                2. Nhập từ tệp Excel (.xlsx, .xls) hoặc CSV
-              </p>
-              <input
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                aria-label="Chọn tệp Excel hoặc CSV"
-                className="block w-full text-xs sm:text-sm file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-secondary-foreground"
-                onChange={(event) => {
-                  setImportFile(event.target.files?.[0] || null);
-                  setImportResult('');
-                }}
-              />
-              <p className="text-xs text-muted-foreground">
-                Cột bắt buộc: Tên môn học, Mã học phần, Thứ, Giờ bắt đầu, Giờ kết thúc. Tùy chọn: Phòng học, Từ ngày, Đến ngày, Loại tuần.
-              </p>
-              <Button
-                disabled={!importFile || importBusy}
-                onClick={handleImport}
-                className="w-full"
-              >
-                {importBusy ? 'Đang nhập...' : 'Xác nhận nhập tệp'}
-              </Button>
-            </div>
+            {importModalTab === 'excel' && (
+              <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold">
+                    Nhập từ tệp Excel (.xlsx, .xls) hoặc CSV
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Tải lên tệp bảng tính chứa danh sách môn học và lịch học để tạo hàng loạt.
+                  </p>
+                </div>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  aria-label="Chọn tệp Excel hoặc CSV"
+                  className="block w-full text-xs sm:text-sm file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-secondary-foreground"
+                  onChange={(event) => {
+                    setImportFile(event.target.files?.[0] || null);
+                    setImportResult('');
+                  }}
+                />
+                <div className="rounded-lg border bg-background p-2.5 text-xs text-muted-foreground space-y-1">
+                  <p>
+                    <span className="font-semibold text-foreground">Cột bắt buộc:</span> Tên môn học, Mã học phần, Thứ, Giờ bắt đầu, Giờ kết thúc.
+                  </p>
+                  <p>
+                    <span className="font-semibold text-foreground">Tùy chọn:</span> Phòng học, Từ ngày, Đến ngày, Loại tuần.
+                  </p>
+                </div>
+                <Button
+                  disabled={!importFile || importBusy}
+                  onClick={handleImport}
+                  className="w-full"
+                >
+                  {importBusy ? 'Đang nhập...' : 'Xác nhận nhập tệp'}
+                </Button>
+              </div>
+            )}
+
+            {importModalTab === 'manual' && (
+              <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold">
+                    Thêm buổi học thủ công / Học bù
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Thêm nhanh một buổi học mới, buổi học bù hoặc đổi lịch cho môn học đã có.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  className="w-full gap-2"
+                  onClick={() => {
+                    setImportOpen(false);
+                    setMakeupOpen(true);
+                  }}
+                >
+                  <CalendarPlus className="h-4 w-4" />
+                  Mở biểu mẫu thêm buổi học
+                </Button>
+              </div>
+            )}
 
             {importResult && (
               <p
@@ -1556,7 +1636,7 @@ export default function SchedulePage() {
                 {importResult}
               </p>
             )}
-          </div>
+          </Tabs>
         </DialogContent>
       </Dialog>
 

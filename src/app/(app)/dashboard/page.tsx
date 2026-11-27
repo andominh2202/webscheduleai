@@ -547,11 +547,13 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      {/* Welcome Header & Quick Actions */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between border-b pb-5">
         <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-2xl font-bold tracking-tight">Tổng quan học tập</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Tổng quan học tập
+            </h1>
             {data.activeSemester?.name && (
               <Badge variant="secondary" className="font-medium text-xs">
                 {data.activeSemester.name}
@@ -566,10 +568,10 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="sm"
             disabled={refreshing}
             onClick={() => {
@@ -577,22 +579,34 @@ export default function DashboardPage() {
               invalidateCache('/api/exams');
               fetchDashboard(true);
             }}
-            className="gap-1.5"
+            className="gap-1.5 text-muted-foreground hover:text-foreground"
           >
-            <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
+            <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} />
             Làm mới
+          </Button>
+          <Button asChild variant="outline" size="sm" className="gap-1.5">
+            <Link href="/courses">
+              <BookOpen className="w-3.5 h-3.5" />
+              Môn học
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="sm" className="gap-1.5">
+            <Link href="/exams">
+              <GraduationCap className="w-3.5 h-3.5" />
+              Lịch thi
+            </Link>
           </Button>
           <Button asChild size="sm" className="gap-1.5">
             <Link href="/schedule">
-              <Calendar className="w-4 h-4" />
+              <Calendar className="w-3.5 h-3.5" />
               Thời khóa biểu
             </Link>
           </Button>
         </div>
       </div>
 
-      {/* KPI Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      {/* Concise KPI Strip */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {statCards.map((stat) => {
           const Icon = stat.icon;
           return (
@@ -602,28 +616,27 @@ export default function DashboardPage() {
               aria-label={`${stat.label}: ${stat.value}`}
               className="group block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <Card className="relative overflow-hidden h-full transition-all duration-200 hover:shadow-md hover:border-primary/40">
-                <div className={cn('h-1 w-full', stat.accentBar)} />
-                <CardContent className="p-4 sm:p-5 flex items-start justify-between gap-3">
-                  <div className="space-y-1 min-w-0">
-                    <p className="text-xs sm:text-sm font-medium text-muted-foreground truncate">
+              <Card className="h-full transition-colors duration-150 hover:bg-accent/30 hover:border-primary/30">
+                <CardContent className="p-4 flex items-center justify-between gap-3">
+                  <div className="space-y-0.5 min-w-0">
+                    <p className="text-xs font-medium text-muted-foreground truncate">
                       {stat.label}
                     </p>
-                    <p className="text-2xl sm:text-3xl font-bold tracking-tight tabular-nums">
+                    <p className="text-2xl font-semibold tracking-tight tabular-nums">
                       {stat.value}
                     </p>
                     <p className="text-[11px] text-muted-foreground truncate flex items-center gap-1">
                       <span className="truncate">{stat.sublabel}</span>
-                      <ArrowUpRight className="w-3 h-3 opacity-0 -translate-x-0.5 group-hover:opacity-100 group-hover:translate-x-0 transition-all shrink-0" />
+                      <ArrowUpRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                     </p>
                   </div>
                   <div
                     className={cn(
-                      'w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105',
+                      'w-9 h-9 rounded-lg flex items-center justify-center shrink-0',
                       stat.iconClass
                     )}
                   >
-                    <Icon className="w-5 h-5 sm:w-5.5 sm:h-5.5" />
+                    <Icon className="w-4 h-4" />
                   </div>
                 </CardContent>
               </Card>

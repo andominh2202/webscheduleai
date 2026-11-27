@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import { useTheme } from 'next-themes';
 import {
@@ -83,8 +83,24 @@ interface TopbarProps {
   onMobileMenuClick: () => void;
 }
 
+const PAGE_LABELS: Record<string, string> = {
+  '/dashboard': 'Tổng quan',
+  '/schedule': 'Thời khóa biểu',
+  '/courses': 'Môn học',
+  '/notes': 'Ghi chú',
+  '/assignments': 'Bài tập',
+  '/exams': 'Lịch thi',
+  '/gpa': 'Tính GPA',
+  '/settings': 'Cài đặt',
+};
+
 export const Topbar = memo(function Topbar({ onMobileMenuClick }: TopbarProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const pageTitle =
+    Object.entries(PAGE_LABELS).find(
+      ([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+    )?.[1] || 'WebSchedule';
   const { data: session } = useSession();
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
@@ -471,10 +487,10 @@ export const Topbar = memo(function Topbar({ onMobileMenuClick }: TopbarProps) {
   };
 
   return (
-    <header className="h-16 border-b border-border/80 bg-card/85 backdrop-blur-md flex items-center justify-between px-3 sm:px-5 gap-2.5 sticky top-0 z-30">
+    <header className="h-14 border-b border-border/80 bg-card/90 backdrop-blur-md flex items-center justify-between px-3 sm:px-5 gap-2.5 sticky top-0 z-30">
       {/* Mobile expanded search bar */}
       {mobileSearchOpen && (
-        <div className="absolute inset-x-0 top-0 h-16 bg-card px-3 flex items-center gap-2 z-50 sm:hidden border-b border-border">
+        <div className="absolute inset-x-0 top-0 h-14 bg-card px-3 flex items-center gap-2 z-50 sm:hidden border-b border-border">
           <div className="relative flex-1">
             <form onSubmit={handleSearchSubmit} className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
@@ -517,8 +533,12 @@ export const Topbar = memo(function Topbar({ onMobileMenuClick }: TopbarProps) {
         </div>
       )}
 
-      <div className="flex items-center gap-2 flex-1 min-w-0">
+      <div className="flex items-center gap-2.5 flex-1 min-w-0">
         <MobileMenuButton onClick={onMobileMenuClick} />
+
+        <span className="hidden lg:inline-flex items-center text-sm font-semibold tracking-tight text-foreground truncate pr-1">
+          {pageTitle}
+        </span>
 
         {/* Mobile search trigger */}
         <Button

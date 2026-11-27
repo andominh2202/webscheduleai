@@ -98,7 +98,7 @@ export const Sidebar = memo(function Sidebar({
         {/* Brand header */}
         <div
           className={cn(
-            'flex items-center justify-between h-16 border-b border-border/80 px-4',
+            'flex items-center justify-between h-14 border-b border-border/80 px-4',
             desktopCollapsed && 'lg:justify-center lg:px-2'
           )}
         >
@@ -151,17 +151,17 @@ export const Sidebar = memo(function Sidebar({
                 aria-current={isActive ? 'page' : undefined}
                 aria-label={desktopCollapsed ? item.label : undefined}
                 className={cn(
-                  'group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150',
+                  'group relative flex items-center gap-3 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   desktopCollapsed && 'lg:justify-center lg:px-0',
                   isActive
-                    ? 'bg-primary/10 text-primary dark:bg-primary/15 dark:text-blue-400 font-semibold shadow-soft'
+                    ? 'bg-primary/10 text-primary dark:bg-primary/15 dark:text-blue-400 font-semibold'
                     : 'text-muted-foreground hover:bg-accent/80 hover:text-foreground'
                 )}
               >
                 {isActive && (
                   <span
                     aria-hidden="true"
-                    className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-primary"
+                    className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-primary"
                   />
                 )}
                 <Icon

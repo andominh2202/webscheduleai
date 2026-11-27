@@ -35,6 +35,7 @@ export interface ListViewCourse {
   name: string;
   courseCode?: string | null;
   color: string;
+  instructor?: string | null;
 }
 
 export interface ListViewSession {

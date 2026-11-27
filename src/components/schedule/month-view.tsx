@@ -367,9 +367,17 @@ export function MonthView({
 
     const isCancelled = props.status === 'cancelled';
     const palette = getCoursePalette(props.courseColor);
+    const tooltipText = [
+      eventInfo.event.title,
+      props.timeLabel,
+      props.room ? `P.${props.room}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(' • ');
 
     return (
       <div
+        title={tooltipText}
         style={isCancelled ? undefined : palette.cssVars}
         className={cn(
           'flex items-center gap-1 rounded border border-l-[3px] px-1.5 py-0.5 text-[10px] sm:text-[11px] leading-tight truncate transition-colors',
@@ -477,7 +485,7 @@ export function MonthView({
           </div>
         )}
 
-        <div className="min-w-[560px] sm:min-w-0 [&_.fc-daygrid-event]:!bg-transparent [&_.fc-daygrid-event]:!border-0 [&_.fc-daygrid-event-harness]:mb-0.5">
+        <div className="min-w-[560px] sm:min-w-0 [&_.fc-daygrid-event]:!bg-transparent [&_.fc-daygrid-event]:!border-0 [&_.fc-daygrid-event-harness]:mb-0.5 [&_.fc-day-today_.fc-daygrid-day-number]:bg-primary [&_.fc-day-today_.fc-daygrid-day-number]:text-primary-foreground [&_.fc-day-today_.fc-daygrid-day-number]:rounded-full [&_.fc-day-today_.fc-daygrid-day-number]:px-1.5 [&_.fc-day-today_.fc-daygrid-day-number]:py-0.5 [&_.fc-day-today_.fc-daygrid-day-number]:font-bold [&_.fc-day-today_.fc-daygrid-day-number]:m-0.5">
           <FullCalendar
             ref={calendarRef}
             plugins={[dayGridPlugin, interactionPlugin]}

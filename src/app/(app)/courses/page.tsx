@@ -236,10 +236,10 @@ function CoursesPageContent() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b pb-5">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-2xl font-bold tracking-tight">Quản lý môn học</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Quản lý môn học</h1>
             {!loading && courses.length > 0 && (
               <Badge variant="secondary" className="text-xs font-medium tabular-nums">
                 {filteredCourses.length} môn • {summaryStats.totalCredits} tín chỉ
@@ -250,7 +250,7 @@ function CoursesPageContent() {
             Danh sách học phần, giảng viên, cơ cấu điểm và lịch học hàng tuần của bạn.
           </p>
         </div>
-        <Button onClick={handleOpenCreate} className="gap-2 self-start sm:self-auto">
+        <Button onClick={handleOpenCreate} size="sm" className="gap-1.5 self-start sm:self-auto">
           <Plus className="h-4 w-4" />
           Thêm môn học
         </Button>
@@ -447,31 +447,24 @@ function CoursesPageContent() {
             return (
               <Card
                 key={course.id}
-                className="group flex flex-col justify-between overflow-hidden transition-all duration-200 hover:shadow-md hover:border-primary/30"
+                className="group flex flex-col justify-between overflow-hidden transition-colors duration-150 hover:border-primary/40"
+                style={{
+                  borderLeftWidth: '4px',
+                  borderLeftColor: accentColor,
+                }}
               >
                 <div>
-                  {/* Distinct color stripe */}
-                  <div
-                    className="h-1.5 w-full"
-                    style={{ backgroundColor: accentColor }}
-                  />
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-start gap-2.5 min-w-0">
-                        <span
-                          className="h-3 w-3 rounded-full shrink-0 mt-1.5 ring-2 ring-background shadow-sm"
-                          style={{ backgroundColor: accentColor }}
-                        />
-                        <div className="min-w-0">
-                          <CardTitle className="text-base sm:text-lg leading-snug line-clamp-2">
-                            {course.name}
-                          </CardTitle>
-                          {selectedSemesterId === 'all' && course.semester?.name && (
-                            <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                              {course.semester.name}
-                            </p>
-                          )}
-                        </div>
+                      <div className="min-w-0">
+                        <CardTitle className="text-base font-semibold leading-snug line-clamp-2">
+                          {course.name}
+                        </CardTitle>
+                        {selectedSemesterId === 'all' && course.semester?.name && (
+                          <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                            {course.semester.name}
+                          </p>
+                        )}
                       </div>
                       <Badge
                         variant="secondary"
