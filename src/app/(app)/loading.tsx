@@ -15,12 +15,12 @@ export default function Loading() {
       {/* Page header skeleton */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-2">
-          <div className="h-7 w-48 rounded-lg bg-muted animate-pulse" />
-          <div className="h-4 w-72 max-w-full rounded-md bg-muted/70 animate-pulse" />
+          <div className="h-7 w-48 rounded-lg skeleton-shimmer" />
+          <div className="h-4 w-72 max-w-full rounded-md skeleton-shimmer opacity-80" />
         </div>
         <div className="flex items-center gap-2">
-          <div className="h-9 w-28 rounded-lg bg-muted animate-pulse" />
-          <div className="h-9 w-32 rounded-lg bg-muted/80 animate-pulse" />
+          <div className="h-9 w-28 rounded-lg skeleton-shimmer" />
+          <div className="h-9 w-32 rounded-lg skeleton-shimmer opacity-85" />
         </div>
       </div>
 

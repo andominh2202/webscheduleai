@@ -48,12 +48,18 @@ export const MobileBottomNav = memo(function MobileBottomNav({
               prefetch={true}
               aria-current={isActive ? 'page' : undefined}
               className={cn(
-                'flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors active:scale-95',
+                'relative flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
                 isActive
-                  ? 'text-primary'
+                  ? 'text-primary font-semibold'
                   : 'text-muted-foreground hover:text-foreground'
               )}
             >
+              {isActive && (
+                <span
+                  aria-hidden="true"
+                  className="absolute top-0 w-6 h-0.5 rounded-full bg-primary"
+                />
+              )}
               <Icon className={cn('h-5 w-5', isActive && 'stroke-[2.25]')} />
               <span className="truncate max-w-[64px]">{item.label}</span>
             </Link>
@@ -65,12 +71,18 @@ export const MobileBottomNav = memo(function MobileBottomNav({
           onClick={onOpenMore}
           aria-label="Mở thêm chức năng"
           className={cn(
-            'flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors active:scale-95',
+            'relative flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
             isMoreActive
-              ? 'text-primary'
+              ? 'text-primary font-semibold'
               : 'text-muted-foreground hover:text-foreground'
           )}
         >
+          {isMoreActive && (
+            <span
+              aria-hidden="true"
+              className="absolute top-0 w-6 h-0.5 rounded-full bg-primary"
+            />
+          )}
           <LayoutGrid className={cn('h-5 w-5', isMoreActive && 'stroke-[2.25]')} />
           <span>Thêm</span>
         </button>

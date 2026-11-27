@@ -60,6 +60,7 @@ export interface WeekViewProps {
   sessions: WeekViewSession[];
   loading?: boolean;
   active?: boolean;
+  selectedSessionId?: string | null;
   hasActiveFilter?: boolean;
   onClearFilter?: () => void;
   onOpenMakeup?: () => void;
@@ -244,6 +245,7 @@ export function WeekView({
   sessions,
   loading = false,
   active = true,
+  selectedSessionId = null,
   hasActiveFilter = false,
   onClearFilter,
   onOpenMakeup,
@@ -255,6 +257,8 @@ export function WeekView({
   const calendarRef = useRef<FullCalendar | null>(null);
   const [rangeLabel, setRangeLabel] = useState<string>('');
   const [currentWeekBounds, setCurrentWeekBounds] = useState<{ start: Date; end: Date } | null>(null);
+  const [calendarMode, setCalendarMode] = useState<'timeGridWeek' | 'timeGridDay'>('timeGridWeek');
+  const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [axisMode, setAxisMode] = useState<'hour' | 'period'>('hour');
   const [compact, setCompact] = useState(false);
   const [mobileMode, setMobileMode] = useState<'agenda' | 'grid'>('grid');
@@ -297,6 +301,35 @@ export function WeekView({
     return nowInfo.todayKey >= startKey && nowInfo.todayKey <= endKey;
   }, [currentWeekBounds, nowInfo]);
 
+  // Detect overlapping sessions per day for conflict badge
+  const overlappingIds = useMemo(() => {
+    const conflicts = new Set<string>();
+    const byDate = new Map<string, Array<{ id: string; start: string; end: string }>>();
+    for (const s of sessions) {
+      if (s.status === 'cancelled') continue;
+      const key = toVnDateString(s.date);
+      const item = { id: s.id, start: normalizeTime(s.startTime), end: normalizeTime(s.endTime) };
+      const list = byDate.get(key);
+      if (list) list.push(item);
+      else byDate.set(key, [item]);
+    }
+    for (const list of byDate.values()) {
+      if (list.length < 2) continue;
+      list.sort((a, b) => a.start.localeCompare(b.start));
+      for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          if (list[j].start < list[i].end) {
+            conflicts.add(list[i].id);
+            conflicts.add(list[j].id);
+          } else {
+            break;
+          }
+        }
+      }
+    }
+    return conflicts;
+  }, [sessions]);
+
   const events: EventInput[] = useMemo(() => {
     return sessions.map((session) => {
       const startNorm = normalizeTime(session.startTime);
@@ -323,16 +356,19 @@ export function WeekView({
           courseId: session.courseId,
           courseName: session.course?.name || 'Buổi học',
           courseCode: session.course?.courseCode || '',
+          instructor: session.course?.instructor || '',
           color: session.course?.color || '#3b82f6',
           startTime: startNorm,
           endTime: endNorm,
           status: session.status,
           type: session.type || 'regular',
           isOngoing,
+          isOverlapping: overlappingIds.has(session.id),
+          isSelected: selectedSessionId === session.id,
         },
       };
     });
-  }, [sessions, nowInfo]);
+  }, [sessions, nowInfo, overlappingIds, selectedSessionId]);
 
   // Group sessions by day of week for mobile Agenda mode
   const groupedWeekDays = useMemo(() => {
@@ -365,9 +401,15 @@ export function WeekView({
   const handleDatesSet = useCallback(
     (arg: DatesSetArg) => {
       const endDisplay = new Date(arg.end.getTime() - 86400000);
-      const startLabel = format(arg.start, 'dd/MM', { locale: vi });
-      const endLabel = format(endDisplay, 'dd/MM/yyyy', { locale: vi });
-      setRangeLabel(`Tuần ${startLabel} – ${endLabel}`);
+      if (arg.view.type === 'timeGridDay') {
+        const dayLabel = format(arg.start, 'EEEE, dd/MM/yyyy', { locale: vi });
+        setRangeLabel(dayLabel.charAt(0).toUpperCase() + dayLabel.slice(1));
+        setSelectedDateKey(format(arg.start, 'yyyy-MM-dd'));
+      } else {
+        const startLabel = format(arg.start, 'dd/MM', { locale: vi });
+        const endLabel = format(endDisplay, 'dd/MM/yyyy', { locale: vi });
+        setRangeLabel(`Tuần ${startLabel} – ${endLabel}`);
+      }
       setCurrentWeekBounds({ start: arg.start, end: endDisplay });
 
       const rangeKey = `${arg.startStr}_${arg.endStr}`;
@@ -380,6 +422,17 @@ export function WeekView({
     },
     [active, onDateRangeChange]
   );
+
+  const switchCalendarMode = useCallback((mode: 'timeGridWeek' | 'timeGridDay', targetDate?: Date) => {
+    setCalendarMode(mode);
+    const api = calendarRef.current?.getApi();
+    if (!api) return;
+    if (targetDate) {
+      api.changeView(mode, targetDate);
+    } else {
+      api.changeView(mode);
+    }
+  }, []);
 
   const handleEventClick = useCallback(
     (info: EventClickArg) => {
@@ -428,67 +481,85 @@ export function WeekView({
       type?: string;
       courseName?: string;
       courseCode?: string;
+      instructor?: string;
       color?: string;
       isOngoing?: boolean;
+      isOverlapping?: boolean;
+      isSelected?: boolean;
     };
 
     const isCancelled = props.status === 'cancelled';
     const isCompleted = props.status === 'completed';
     const palette = getCoursePalette(props.color);
+    const statusLabel = props.status ? (SESSION_STATUS_LABELS[props.status] || props.status) : '';
     const tooltipText = [
       props.courseCode ? `[${props.courseCode}] ${props.courseName || eventInfo.event.title}` : (props.courseName || eventInfo.event.title),
-      `${props.startTime}–${props.endTime}`,
-      props.room ? `Phòng ${props.room}` : props.location,
+      `Thời gian: ${props.startTime}–${props.endTime}`,
+      props.room ? `Phòng: ${props.room}` : props.location ? `Địa điểm: ${props.location}` : '',
+      props.instructor ? `GV: ${props.instructor}` : '',
+      statusLabel ? `Trạng thái: ${statusLabel}` : '',
+      props.isOverlapping ? '⚠ Trùng giờ với buổi học khác' : '',
     ]
       .filter(Boolean)
-      .join(' • ');
+      .join('\n');
 
     return (
       <div
         title={tooltipText}
         style={isCancelled ? undefined : palette.cssVars}
         className={cn(
-          'group h-full w-full rounded-md border border-l-[3.5px] px-1.5 py-1 overflow-hidden flex flex-col justify-between leading-tight select-none transition-all',
+          'group h-full w-full rounded-lg border border-l-[4px] px-2 py-1.5 overflow-hidden flex flex-col justify-between leading-tight select-none transition-all duration-150 cursor-pointer',
           isCancelled
             ? 'bg-slate-100/95 border-slate-300 border-l-rose-500 text-slate-600 dark:bg-slate-900/90 dark:border-slate-700 dark:border-l-rose-500 dark:text-slate-400'
-            : 'bg-[var(--c-bg)] hover:bg-[var(--c-bg-hover)] border-[var(--c-border)] border-l-[var(--c-accent)] text-[var(--c-text)] dark:bg-[var(--c-dark-bg)] dark:hover:bg-[var(--c-dark-bg-hover)] dark:border-[var(--c-dark-border)] dark:text-[var(--c-dark-text)] shadow-sm',
-          props.isOngoing && 'ring-2 ring-rose-500/70 shadow-sm'
+            : 'bg-[var(--c-bg)] hover:bg-[var(--c-bg-hover)] border-[var(--c-border)] border-l-[var(--c-accent)] text-[var(--c-text)] dark:bg-[var(--c-dark-bg)] dark:hover:bg-[var(--c-dark-bg-hover)] dark:border-[var(--c-dark-border)] dark:text-[var(--c-dark-text)] shadow-sm hover:shadow-md hover:-translate-y-[1px]',
+          props.isOngoing && 'ring-2 ring-rose-500/80 shadow-sm',
+          props.isSelected && 'ring-2 ring-primary ring-offset-1 ring-offset-background shadow-md z-30'
         )}
       >
-        <div className="space-y-0.5 min-w-0">
-          <div className="flex items-center justify-between gap-1 text-[10px] font-medium tabular-nums truncate">
+        <div className="space-y-1 min-w-0">
+          <div className="flex items-center justify-between gap-1 text-[10px] font-medium tabular-nums">
             <span
               className={cn(
-                'truncate',
+                'truncate font-semibold',
                 !isCancelled && 'text-[var(--c-sub)] dark:text-[var(--c-dark-sub)]'
               )}
             >
               {props.startTime}–{props.endTime}
             </span>
 
-            {props.isOngoing ? (
-              <span className="inline-flex items-center gap-0.5 rounded bg-rose-500 px-1 py-0.5 text-[9px] font-semibold text-white shrink-0">
-                <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
-                Đang học
-              </span>
-            ) : isCancelled ? (
-              <span className="rounded bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 px-1 py-0.5 text-[9px] font-semibold shrink-0">
-                {SESSION_STATUS_LABELS.cancelled}
-              </span>
-            ) : props.type === 'makeup' ? (
-              <span className="rounded bg-[var(--c-badge)] dark:bg-[var(--c-dark-badge)] px-1 py-0.5 text-[9px] font-semibold shrink-0">
-                Học bù
-              </span>
-            ) : props.type === 'moved' ? (
-              <span className="rounded bg-[var(--c-badge)] dark:bg-[var(--c-dark-badge)] px-1 py-0.5 text-[9px] font-semibold shrink-0">
-                Đổi lịch
-              </span>
-            ) : isCompleted ? (
-              <CheckCircle2
-                className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400"
-                aria-label="Đã học"
-              />
-            ) : null}
+            <div className="flex items-center gap-1 shrink-0">
+              {props.isOverlapping && !isCancelled && (
+                <span
+                  className="rounded bg-amber-500/20 text-amber-800 dark:bg-amber-500/25 dark:text-amber-200 px-1 py-0.5 text-[9px] font-semibold"
+                  title="Trùng giờ"
+                >
+                  Trùng
+                </span>
+              )}
+              {props.isOngoing ? (
+                <span className="inline-flex items-center gap-0.5 rounded bg-rose-500 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                  <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+                  Đang học
+                </span>
+              ) : isCancelled ? (
+                <span className="rounded bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 px-1 py-0.5 text-[9px] font-semibold">
+                  {SESSION_STATUS_LABELS.cancelled}
+                </span>
+              ) : props.type === 'makeup' ? (
+                <span className="rounded bg-[var(--c-badge)] dark:bg-[var(--c-dark-badge)] px-1 py-0.5 text-[9px] font-semibold">
+                  Học bù
+                </span>
+              ) : props.type === 'moved' ? (
+                <span className="rounded bg-[var(--c-badge)] dark:bg-[var(--c-dark-badge)] px-1 py-0.5 text-[9px] font-semibold">
+                  Đổi lịch
+                </span>
+              ) : isCompleted ? (
+                <CheckCircle2
+                  className="h-3 w-3 text-emerald-600 dark:text-emerald-400"
+                  aria-label="Đã học"
+                />
+              ) : null}
+            </div>
           </div>
 
           <div
@@ -499,12 +570,27 @@ export function WeekView({
           >
             {props.courseName || eventInfo.event.title}
           </div>
+
+          {props.courseCode && (
+            <div className="inline-flex max-w-full">
+              <span
+                className={cn(
+                  'rounded px-1.5 py-0.5 text-[9px] font-semibold tracking-wide truncate',
+                  isCancelled
+                    ? 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                    : 'bg-[var(--c-badge)] text-[var(--c-text)] dark:bg-[var(--c-dark-badge)] dark:text-[var(--c-dark-text)]'
+                )}
+              >
+                {props.courseCode}
+              </span>
+            </div>
+          )}
         </div>
 
         {(props.room || props.location) && (
           <div
             className={cn(
-              'flex items-center gap-1 mt-0.5 text-[10px] font-medium truncate',
+              'flex items-center gap-1 mt-1 text-[10px] font-medium truncate',
               !isCancelled && 'text-[var(--c-sub)] dark:text-[var(--c-dark-sub)]'
             )}
           >
@@ -540,6 +626,54 @@ export function WeekView({
       return undefined;
     },
     [axisMode]
+  );
+
+  const dayHeaderContent = useCallback(
+    (arg: { date: Date; isToday: boolean }) => {
+      const dateKey = format(arg.date, 'yyyy-MM-dd');
+      const isSelected = selectedDateKey === dateKey;
+      const dow = arg.date.getDay();
+      const dayMeta = WEEKDAY_LABELS.find((d) => d.dow === dow);
+      const dayNum = format(arg.date, 'dd/MM');
+
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedDateKey(dateKey);
+            if (calendarMode === 'timeGridWeek') {
+              switchCalendarMode('timeGridDay', arg.date);
+            }
+          }}
+          title={
+            calendarMode === 'timeGridWeek'
+              ? `Xem chi tiết ngày ${dayMeta?.full || ''} (${dayNum})`
+              : `${dayMeta?.full || ''} (${dayNum})`
+          }
+          className={cn(
+            'w-full flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-lg transition-colors cursor-pointer',
+            arg.isToday
+              ? 'bg-primary/10 text-primary'
+              : isSelected
+                ? 'bg-muted text-foreground'
+                : 'hover:bg-muted/60 text-foreground'
+          )}
+        >
+          <span className="text-[11px] font-semibold uppercase tracking-wider opacity-80">
+            {calendarMode === 'timeGridDay' ? dayMeta?.full : dayMeta?.short}
+          </span>
+          <span
+            className={cn(
+              'inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-bold tabular-nums',
+              arg.isToday && 'bg-primary text-primary-foreground shadow-xs'
+            )}
+          >
+            {dayNum}
+          </span>
+        </button>
+      );
+    },
+    [calendarMode, selectedDateKey, switchCalendarMode]
   );
 
   const showInitialSkeleton = loading && sessions.length === 0;
@@ -639,6 +773,43 @@ export function WeekView({
             >
               <Rows3 className="w-3 h-3" />
               Theo thứ
+            </button>
+          </div>
+
+          {/* Day / Week View Switcher */}
+          <div
+            role="group"
+            aria-label="Chế độ xem lịch"
+            className={cn(
+              'inline-flex items-center rounded-lg border bg-background p-0.5 text-xs',
+              mobileMode === 'agenda' && 'hidden md:inline-flex'
+            )}
+          >
+            <button
+              type="button"
+              aria-pressed={calendarMode === 'timeGridWeek'}
+              onClick={() => switchCalendarMode('timeGridWeek')}
+              className={cn(
+                'px-2.5 py-1 rounded-md font-medium transition-colors',
+                calendarMode === 'timeGridWeek'
+                  ? 'bg-primary text-primary-foreground shadow-2xs'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              Tuần
+            </button>
+            <button
+              type="button"
+              aria-pressed={calendarMode === 'timeGridDay'}
+              onClick={() => switchCalendarMode('timeGridDay')}
+              className={cn(
+                'px-2.5 py-1 rounded-md font-medium transition-colors',
+                calendarMode === 'timeGridDay'
+                  ? 'bg-primary text-primary-foreground shadow-2xs'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              Ngày
             </button>
           </div>
 
@@ -876,8 +1047,10 @@ export function WeekView({
             '[&_.fc-timegrid-col.fc-day-today]:bg-primary/[0.025]',
             '[&_.fc-col-header-cell.fc-day-today]:bg-primary/10 [&_.fc-col-header-cell.fc-day-today_.fc-col-header-cell-cushion]:text-primary [&_.fc-col-header-cell.fc-day-today_.fc-col-header-cell-cushion]:font-bold',
             compact
-              ? 'w-full min-w-0 [&_.fc-col-header-cell-cushion]:text-[11px] sm:[&_.fc-col-header-cell-cushion]:text-xs [&_.fc-timegrid-slot]:h-[1.75em]'
-              : 'min-w-[680px] sm:min-w-0 [&_.fc-timegrid-slot]:h-[2.25em]'
+              ? 'w-full min-w-0 [&_.fc-col-header-cell-cushion]:text-[11px] sm:[&_.fc-col-header-cell-cushion]:text-xs [&_.fc-timegrid-slot]:h-[1.85em]'
+              : calendarMode === 'timeGridDay'
+                ? 'w-full min-w-0 [&_.fc-timegrid-slot]:h-[2.6em]'
+                : 'min-w-[680px] sm:min-w-0 [&_.fc-timegrid-slot]:h-[2.5em]'
           )}
         >
           <FullCalendar
@@ -896,17 +1069,14 @@ export function WeekView({
               minute: '2-digit',
               hour12: false,
             }}
-            dayHeaderFormat={{
-              weekday: 'short',
-              day: '2-digit',
-              month: '2-digit',
-            }}
+            dayHeaderContent={dayHeaderContent}
             allDaySlot={false}
             nowIndicator={true}
+            slotEventOverlap={false}
             editable={Boolean(onSessionReschedule)}
             eventDurationEditable={Boolean(onSessionReschedule)}
             height="auto"
-            eventMinHeight={compact ? 22 : 34}
+            eventMinHeight={compact ? 28 : 44}
             dayHeaderClassNames={compact ? 'text-[11px] sm:text-xs' : 'text-xs sm:text-sm'}
             expandRows={true}
             events={events}

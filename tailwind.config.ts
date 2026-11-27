@@ -44,17 +44,48 @@ const config: Config = {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
+        surface: {
+          subtle: 'hsl(var(--surface-subtle))',
+          elevated: 'hsl(var(--surface-elevated))',
+        },
+        success: {
+          DEFAULT: 'hsl(var(--success))',
+          foreground: 'hsl(var(--success-foreground))',
+        },
+        warning: {
+          DEFAULT: 'hsl(var(--warning))',
+          foreground: 'hsl(var(--warning-foreground))',
+        },
+        info: {
+          DEFAULT: 'hsl(var(--info))',
+          foreground: 'hsl(var(--info-foreground))',
+        },
       },
       borderRadius: {
-        xl: 'calc(var(--radius) + 4px)',
-        lg: 'var(--radius)',
-        md: 'calc(var(--radius) - 2px)',
-        sm: 'calc(var(--radius) - 4px)',
+        xl: 'var(--radius-xl)',
+        lg: 'var(--radius-lg)',
+        md: 'var(--radius-md)',
+        sm: 'var(--radius-sm)',
+        xs: 'var(--radius-xs)',
       },
       boxShadow: {
-        soft: '0 1px 2px 0 rgb(15 23 42 / 0.04)',
-        card: '0 1px 3px 0 rgb(15 23 42 / 0.05), 0 1px 2px -1px rgb(15 23 42 / 0.05)',
-        elevated: '0 12px 28px -6px rgb(15 23 42 / 0.14), 0 4px 10px -4px rgb(15 23 42 / 0.08)',
+        soft: 'var(--shadow-xs)',
+        card: 'var(--shadow-sm)',
+        md: 'var(--shadow-md)',
+        elevated: 'var(--shadow-lg)',
+      },
+      zIndex: {
+        sticky: 'var(--z-sticky)',
+        dropdown: 'var(--z-dropdown)',
+        popover: 'var(--z-popover)',
+        modal: 'var(--z-modal)',
+        tooltip: 'var(--z-tooltip)',
+        toast: 'var(--z-toast)',
+      },
+      transitionDuration: {
+        fast: 'var(--transition-fast)',
+        base: 'var(--transition-base)',
+        slow: 'var(--transition-slow)',
       },
       keyframes: {
         'fade-in': {

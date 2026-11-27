@@ -32,16 +32,30 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
-const navItems = [
-  { href: '/dashboard', label: 'Tổng quan', icon: LayoutDashboard },
-  { href: '/schedule', label: 'Thời khóa biểu', icon: Calendar },
-  { href: '/courses', label: 'Môn học', icon: BookOpen },
-  { href: '/notes', label: 'Ghi chú', icon: StickyNote },
-  { href: '/assignments', label: 'Bài tập', icon: ClipboardList },
-  { href: '/exams', label: 'Lịch thi', icon: FileText },
-  { href: '/gpa', label: 'Tính GPA', icon: Calculator },
-  { href: '/settings', label: 'Cài đặt', icon: Settings },
+const navGroups = [
+  {
+    label: 'Học tập',
+    items: [
+      { href: '/dashboard', label: 'Tổng quan', icon: LayoutDashboard },
+      { href: '/schedule', label: 'Thời khóa biểu', icon: Calendar },
+      { href: '/courses', label: 'Môn học', icon: BookOpen },
+      { href: '/notes', label: 'Ghi chú', icon: StickyNote },
+    ],
+  },
+  {
+    label: 'Theo dõi',
+    items: [
+      { href: '/assignments', label: 'Bài tập', icon: ClipboardList },
+      { href: '/exams', label: 'Lịch thi', icon: FileText },
+      { href: '/gpa', label: 'Tính GPA', icon: Calculator },
+    ],
+  },
+  {
+    label: 'Hệ thống',
+    items: [{ href: '/settings', label: 'Cài đặt', icon: Settings }],
+  },
 ] as const;
 
 interface SidebarProps {
@@ -61,6 +75,7 @@ export const Sidebar = memo(function Sidebar({
   const { data: session } = useSession();
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -135,60 +150,71 @@ export const Sidebar = memo(function Sidebar({
         {/* Navigation links */}
         <nav
           aria-label="Danh mục trang"
-          className="flex-1 py-4 px-2.5 space-y-1 overflow-y-auto"
+          className="flex-1 py-3 px-2.5 space-y-3 overflow-y-auto"
         >
-          {navItems.map((item) => {
-            const isActive =
-              pathname === item.href || pathname.startsWith(item.href + '/');
-            const Icon = item.icon;
+          {navGroups.map((group, groupIdx) => (
+            <div key={group.label} className="space-y-1">
+              {!desktopCollapsed ? (
+                <p className="px-2.5 pt-1 pb-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/75 select-none">
+                  {group.label}
+                </p>
+              ) : (
+                groupIdx > 0 && <Separator className="my-1.5 mx-auto w-6" />
+              )}
+              {group.items.map((item) => {
+                const isActive =
+                  pathname === item.href || pathname.startsWith(item.href + '/');
+                const Icon = item.icon;
 
-            const linkElement = (
-              <Link
-                key={item.href}
-                href={item.href}
-                prefetch={true}
-                onClick={onMobileClose}
-                aria-current={isActive ? 'page' : undefined}
-                aria-label={desktopCollapsed ? item.label : undefined}
-                className={cn(
-                  'group relative flex items-center gap-3 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  desktopCollapsed && 'lg:justify-center lg:px-0',
-                  isActive
-                    ? 'bg-primary/10 text-primary dark:bg-primary/15 dark:text-blue-400 font-semibold'
-                    : 'text-muted-foreground hover:bg-accent/80 hover:text-foreground'
-                )}
-              >
-                {isActive && (
-                  <span
-                    aria-hidden="true"
-                    className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-primary"
-                  />
-                )}
-                <Icon
-                  className={cn(
-                    'w-[18px] h-[18px] flex-shrink-0 transition-transform duration-150 group-hover:scale-105 motion-reduce:group-hover:scale-100',
-                    isActive
-                      ? 'text-primary dark:text-blue-400'
-                      : 'text-muted-foreground group-hover:text-foreground'
-                  )}
-                />
-                {!desktopCollapsed && <span className="truncate">{item.label}</span>}
-              </Link>
-            );
+                const linkElement = (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    prefetch={true}
+                    onClick={onMobileClose}
+                    aria-current={isActive ? 'page' : undefined}
+                    aria-label={desktopCollapsed ? item.label : undefined}
+                    className={cn(
+                      'group relative flex items-center gap-3 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      desktopCollapsed && 'lg:justify-center lg:px-0',
+                      isActive
+                        ? 'bg-primary/10 text-primary dark:bg-primary/15 dark:text-blue-400 font-semibold'
+                        : 'text-muted-foreground hover:bg-accent/80 hover:text-foreground'
+                    )}
+                  >
+                    {isActive && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-primary"
+                      />
+                    )}
+                    <Icon
+                      className={cn(
+                        'w-[18px] h-[18px] flex-shrink-0 transition-transform duration-150 group-hover:scale-105 motion-reduce:group-hover:scale-100',
+                        isActive
+                          ? 'text-primary dark:text-blue-400'
+                          : 'text-muted-foreground group-hover:text-foreground'
+                      )}
+                    />
+                    {!desktopCollapsed && <span className="truncate">{item.label}</span>}
+                  </Link>
+                );
 
-            if (desktopCollapsed) {
-              return (
-                <Tooltip key={item.href}>
-                  <TooltipTrigger asChild>{linkElement}</TooltipTrigger>
-                  <TooltipContent side="right" className="font-medium">
-                    {item.label}
-                  </TooltipContent>
-                </Tooltip>
-              );
-            }
+                if (desktopCollapsed) {
+                  return (
+                    <Tooltip key={item.href}>
+                      <TooltipTrigger asChild>{linkElement}</TooltipTrigger>
+                      <TooltipContent side="right" className="font-medium">
+                        {item.label}
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                }
 
-            return linkElement;
-          })}
+                return linkElement;
+              })}
+            </div>
+          ))}
         </nav>
 
         <Separator />
@@ -273,7 +299,7 @@ export const Sidebar = memo(function Sidebar({
                       size="icon"
                       aria-label="Đăng xuất"
                       className="h-8 w-8 flex-shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                      onClick={() => signOut({ callbackUrl: '/login' })}
+                      onClick={() => setLogoutConfirmOpen(true)}
                     >
                       <LogOut className="w-4 h-4" />
                     </Button>
@@ -300,6 +326,17 @@ export const Sidebar = memo(function Sidebar({
           )}
         </button>
       </aside>
+
+      <ConfirmDialog
+        open={logoutConfirmOpen}
+        onOpenChange={setLogoutConfirmOpen}
+        title="Xác nhận đăng xuất"
+        description="Bạn có chắc chắn muốn đăng xuất khỏi tài khoản hiện tại không?"
+        confirmLabel="Đăng xuất"
+        cancelLabel="Ở lại"
+        variant="destructive"
+        onConfirm={() => signOut({ callbackUrl: '/login' })}
+      />
     </>
   );
 });

@@ -2,12 +2,14 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
 import { useTheme } from 'next-themes';
 import {
   Bell,
   BookOpen,
   Calendar,
+  ChevronRight,
   ClipboardList,
   FileText,
   LayoutDashboard,
@@ -22,6 +24,8 @@ import {
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BrandLogo } from '@/components/ui/brand-logo';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -128,6 +132,7 @@ export const Topbar = memo(function Topbar({ onMobileMenuClick }: TopbarProps) {
 
   // Notifications state
   const [notifyOpen, setNotifyOpen] = useState(false);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [urgentCount, setUrgentCount] = useState(0);
   const [browserNotifyEnabled, setBrowserNotifyEnabled] = useState(false);
@@ -536,9 +541,29 @@ export const Topbar = memo(function Topbar({ onMobileMenuClick }: TopbarProps) {
       <div className="flex items-center gap-2.5 flex-1 min-w-0">
         <MobileMenuButton onClick={onMobileMenuClick} />
 
-        <span className="hidden lg:inline-flex items-center text-sm font-semibold tracking-tight text-foreground truncate pr-1">
-          {pageTitle}
-        </span>
+        <Link
+          href="/dashboard"
+          aria-label="Trang chủ WebSchedule"
+          className="lg:hidden flex items-center gap-2 shrink-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <BrandLogo size={28} className="w-7 h-7" />
+        </Link>
+
+        <nav
+          aria-label="Breadcrumb"
+          className="hidden lg:flex items-center gap-1.5 text-sm min-w-0 pr-1"
+        >
+          <Link
+            href="/dashboard"
+            className="text-muted-foreground hover:text-foreground transition-colors truncate"
+          >
+            WebSchedule
+          </Link>
+          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
+          <span className="font-semibold tracking-tight text-foreground truncate">
+            {pageTitle}
+          </span>
+        </nav>
 
         {/* Mobile search trigger */}
         <Button
@@ -695,7 +720,7 @@ export const Topbar = memo(function Topbar({ onMobileMenuClick }: TopbarProps) {
               )}
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-80 sm:w-[340px] rounded-xl p-0 overflow-hidden shadow-elevated">
+          <PopoverContent align="end" className="w-80 sm:w-[340px] max-w-[calc(100vw-1rem)] rounded-xl p-0 overflow-hidden shadow-elevated">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-sm text-foreground">
@@ -820,7 +845,7 @@ export const Topbar = memo(function Topbar({ onMobileMenuClick }: TopbarProps) {
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              onClick={() => signOut({ callbackUrl: '/login' })}
+              onClick={() => setLogoutConfirmOpen(true)}
               className="rounded-lg cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
             >
               <LogOut className="w-4 h-4 mr-2" />
@@ -829,6 +854,17 @@ export const Topbar = memo(function Topbar({ onMobileMenuClick }: TopbarProps) {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <ConfirmDialog
+        open={logoutConfirmOpen}
+        onOpenChange={setLogoutConfirmOpen}
+        title="Xác nhận đăng xuất"
+        description="Bạn có chắc chắn muốn đăng xuất khỏi tài khoản hiện tại không?"
+        confirmLabel="Đăng xuất"
+        cancelLabel="Ở lại"
+        variant="destructive"
+        onConfirm={() => signOut({ callbackUrl: '/login' })}
+      />
     </header>
   );
 });

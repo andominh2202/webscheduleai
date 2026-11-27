@@ -74,6 +74,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:px-3 focus:py-2 focus:rounded-lg focus:bg-primary focus:text-primary-foreground focus:text-sm focus:font-medium focus:shadow-lg"
+      >
+        Chuyển đến nội dung chính
+      </a>
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggle={handleToggleSidebar}
